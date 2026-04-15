@@ -1,0 +1,94 @@
+package com.company.tvlauncher
+
+import android.content.Context
+
+data class LaunchPolicy(
+    val mode: String = "app",
+    val targetAppPackage: String = "com.example.cast",
+    val targetHdmiPort: Int = 1
+)
+
+class PolicyStore(private val context: Context) {
+    private val prefs = context.getSharedPreferences("tv_policy", Context.MODE_PRIVATE)
+
+    fun getServerBaseUrl(): String =
+        prefs.getString("server_base_url", "http://10.181.153.84:8000") ?: "http://10.181.153.84:8000"
+
+    fun setServerBaseUrl(url: String) {
+        prefs.edit().putString("server_base_url", url.trimEnd('/')).apply()
+    }
+
+    fun getDeviceToken(): String? = prefs.getString("device_token", null)
+
+    fun setDeviceToken(token: String) {
+        prefs.edit().putString("device_token", token).apply()
+    }
+
+    fun clearDeviceToken() {
+        prefs.edit().remove("device_token").apply()
+    }
+
+    fun getDeviceSn(): String =
+        prefs.getString("device_sn", "") ?: ""
+
+    fun setDeviceSn(sn: String) {
+        prefs.edit().putString("device_sn", sn).apply()
+    }
+
+    fun getPolicy(): LaunchPolicy {
+        return LaunchPolicy(
+            mode = prefs.getString("mode", "app") ?: "app",
+            targetAppPackage = prefs.getString("target_app_package", "com.example.cast")
+                ?: "com.example.cast",
+            targetHdmiPort = prefs.getInt("target_hdmi_port", 1)
+        )
+    }
+
+    fun savePolicy(policy: LaunchPolicy) {
+        prefs.edit()
+            .putString("mode", policy.mode)
+            .putString("target_app_package", policy.targetAppPackage)
+            .putInt("target_hdmi_port", policy.targetHdmiPort)
+            .apply()
+    }
+
+    fun getSettingsPassword(): String =
+        prefs.getString("settings_password", "0000") ?: "0000"
+
+    fun setSettingsPassword(password: String) {
+        prefs.edit().putString("settings_password", password).apply()
+    }
+
+    fun getKioskEnabled(): Boolean = prefs.getBoolean("kiosk_enabled", true)
+
+    fun setKioskEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("kiosk_enabled", enabled).apply()
+    }
+
+    fun getEscapeUntilMs(): Long = prefs.getLong("escape_until_ms", 0L)
+
+    fun setEscapeUntilMs(untilMs: Long) {
+        prefs.edit().putLong("escape_until_ms", untilMs).apply()
+    }
+
+    fun isEscapeModeActive(nowMs: Long = System.currentTimeMillis()): Boolean {
+        val until = getEscapeUntilMs()
+        return until > nowMs
+    }
+
+    fun applyRemotePolicy(
+        mode: String?,
+        targetApp: String?,
+        hdmiPort: Int?
+    ) {
+        if (mode.isNullOrBlank()) return
+        val editor = prefs.edit().putString("mode", mode)
+        if (!targetApp.isNullOrBlank()) {
+            editor.putString("target_app_package", targetApp)
+        }
+        if (hdmiPort != null && hdmiPort > 0) {
+            editor.putInt("target_hdmi_port", hdmiPort)
+        }
+        editor.apply()
+    }
+}
