@@ -76,12 +76,26 @@ class PolicyStore(private val context: Context) {
         return until > nowMs
     }
 
+    /**
+     * 应用远程策略
+     * @return true 如果策略有变化，false 如果策略没有变化
+     */
     fun applyRemotePolicy(
         mode: String?,
         targetApp: String?,
         hdmiPort: Int?
-    ) {
-        if (mode.isNullOrBlank()) return
+    ): Boolean {
+        if (mode.isNullOrBlank()) return false
+
+        // 检查是否有变化
+        val currentPolicy = getPolicy()
+        val modeChanged = mode != currentPolicy.mode
+        val appChanged = !targetApp.isNullOrBlank() && targetApp != currentPolicy.targetAppPackage
+        val hdmiChanged = hdmiPort != null && hdmiPort > 0 && hdmiPort != currentPolicy.targetHdmiPort
+
+        val hasChange = modeChanged || appChanged || hdmiChanged
+
+        // 保存策略
         val editor = prefs.edit().putString("mode", mode)
         if (!targetApp.isNullOrBlank()) {
             editor.putString("target_app_package", targetApp)
@@ -90,5 +104,7 @@ class PolicyStore(private val context: Context) {
             editor.putInt("target_hdmi_port", hdmiPort)
         }
         editor.apply()
+
+        return hasChange
     }
 }

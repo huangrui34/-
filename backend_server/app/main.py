@@ -343,6 +343,274 @@ def get_screenshot(device_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         return {"ok": False, "detail": str(e)}
 
+# ==================== Scrcpy-like 远程控制功能 ====================
+
+def check_scrcpy_available():
+    """检查Scrcpy是否可用"""
+    try:
+        # 尝试运行scrcpy --version
+        result = subprocess.run(["scrcpy", "--version"], capture_output=True, text=True, timeout=5)
+        return result.returncode == 0
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return False
+
+def get_scrcpy_path():
+    """获取Scrcpy可执行文件路径，如果未安装则尝试自动安装"""
+    import sys
+    import subprocess
+    
+    # 首先检查是否在PATH中
+    if check_scrcpy_available():
+        return "scrcpy"
+    
+    # 检查项目目录中的scrcpy
+    project_scrcpy_paths = [
+        os.path.join(os.path.dirname(__file__), "..", "scrcpy", "scrcpy.exe"),  # Windows
+        os.path.join(os.path.dirname(__file__), "..", "scrcpy", "scrcpy"),      # Linux/macOS
+    ]
+    
+    for path in project_scrcpy_paths:
+        if os.path.exists(path):
+            return path
+    
+    # 如果未找到，尝试自动安装
+    print("Scrcpy未找到，尝试自动安装...")
+    install_script = os.path.join(os.path.dirname(__file__), "..", "install_scrcpy.py")
+    
+    if os.path.exists(install_script):
+        try:
+            # 运行安装脚本
+            result = subprocess.run(
+                [sys.executable, install_script],
+                capture_output=True,
+                text=True,
+                timeout=300  # 5分钟超时
+            )
+            
+            if result.returncode == 0:
+                print("Scrcpy自动安装成功")
+                # 安装后再次检查
+                for path in project_scrcpy_paths:
+                    if os.path.exists(path):
+                        return path
+            else:
+                print(f"Scrcpy自动安装失败: {result.stderr}")
+        except Exception as e:
+            print(f"运行安装脚本时出错: {e}")
+    
+    # 检查常见系统安装位置
+    system_paths = [
+        "C:\\Program Files\\scrcpy\\scrcpy.exe",
+        "C:\\scrcpy\\scrcpy.exe",
+        os.path.join(os.path.expanduser("~"), "scrcpy", "scrcpy.exe"),
+    ]
+    
+    for path in system_paths:
+        if os.path.exists(path):
+            return path
+    
+    return None
+
+# Scrcpy连接管理器
+class ScrcpyManager:
+    def __init__(self):
+        self.active_sessions = {}  # device_id -> process
+    
+    def start_scrcpy(self, device_id: int, ip: str, port: int = 5555):
+        """启动Scrcpy会话"""
+        try:
+            scrcpy_path = get_scrcpy_path()
+            if not scrcpy_path:
+                return {"ok": False, "detail": "Scrcpy未安装，请先安装Scrcpy"}
+            
+            # 首先确保ADB连接
+            adb_path = resolve_adb_path()
+            subprocess.run([adb_path, "connect", f"{ip}:{port}"], timeout=10)
+            
+            # 启动Scrcpy
+            # 使用简化的参数确保稳定启动
+            cmd = [
+                scrcpy_path,
+                "--serial", f"{ip}:{port}",
+                "--no-audio",
+                "--max-fps", "30",
+                "--max-size", "1024",
+                "--always-on-top",
+                "--window-title", f"小米电视远程控制 - {ip}"
+            ]
+            
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.active_sessions[device_id] = process
+            
+            return {"ok": True, "message": f"Scrcpy会话已启动，PID: {process.pid}"}
+        
+        except Exception as e:
+            return {"ok": False, "detail": f"启动Scrcpy失败: {str(e)}"}
+    
+    def stop_scrcpy(self, device_id: int):
+        """停止Scrcpy会话"""
+        if device_id in self.active_sessions:
+            process = self.active_sessions[device_id]
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+            del self.active_sessions[device_id]
+            return {"ok": True, "message": "Scrcpy会话已停止"}
+        return {"ok": False, "detail": "未找到活动的Scrcpy会话"}
+    
+    def get_session_status(self, device_id: int):
+        """获取Scrcpy会话状态"""
+        if device_id in self.active_sessions:
+            process = self.active_sessions[device_id]
+            if process.poll() is None:
+                return {"ok": True, "status": "running", "pid": process.pid}
+            else:
+                return {"ok": True, "status": "stopped", "exit_code": process.returncode}
+        return {"ok": False, "status": "not_running"}
+
+scrcpy_manager = ScrcpyManager()
+
+# Scrcpy相关API端点
+@app.get("/api/v1/scrcpy/check")
+async def check_scrcpy_installation():
+    """检查Scrcpy安装状态"""
+    scrcpy_path = get_scrcpy_path()
+    if scrcpy_path:
+        return {
+            "ok": True, 
+            "installed": True,
+            "path": scrcpy_path,
+            "message": "Scrcpy已安装"
+        }
+    else:
+        return {
+            "ok": False,
+            "installed": False,
+            "message": "Scrcpy未安装，请先安装Scrcpy"
+        }
+
+@app.post("/api/v1/devices/{device_id}/scrcpy/start")
+async def start_scrcpy_session(device_id: int, db: Session = Depends(get_db)):
+    """启动Scrcpy远程控制会话"""
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    
+    ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
+    if not ip or ip == "0.0.0.0":
+        raise HTTPException(status_code=400, detail="Device has no valid IP for ADB")
+    
+    result = scrcpy_manager.start_scrcpy(device_id, ip)
+    
+    if result["ok"]:
+        log_operation(db, "start_scrcpy", f"启动Scrcpy远程控制会话", device_id, device.device_name)
+    
+    return result
+
+@app.post("/api/v1/devices/{device_id}/scrcpy/stop")
+async def stop_scrcpy_session(device_id: int, db: Session = Depends(get_db)):
+    """停止Scrcpy远程控制会话"""
+    result = scrcpy_manager.stop_scrcpy(device_id)
+    
+    if result["ok"]:
+        device = db.query(Device).filter(Device.id == device_id).first()
+        if device:
+            log_operation(db, "stop_scrcpy", f"停止Scrcpy远程控制会话", device_id, device.device_name)
+    
+    return result
+
+@app.get("/api/v1/devices/{device_id}/scrcpy/status")
+async def get_scrcpy_status(device_id: int):
+    """获取Scrcpy会话状态"""
+    return scrcpy_manager.get_session_status(device_id)
+
+# 简化的ADB无线调试API（用于前端直接控制）
+@app.post("/api/v1/devices/{device_id}/adb/connect")
+async def adb_connect_device(device_id: int, db: Session = Depends(get_db)):
+    """通过ADB连接到设备"""
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    
+    ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
+    if not ip or ip == "0.0.0.0":
+        raise HTTPException(status_code=400, detail="Device has no valid IP for ADB")
+    
+    adb_path = resolve_adb_path()
+    
+    try:
+        # 尝试连接
+        result = subprocess.run([adb_path, "connect", f"{ip}:5555"], capture_output=True, text=True, timeout=15)
+        
+        if "connected to" in result.stdout or "already connected" in result.stdout:
+            log_operation(db, "adb_connect", f"ADB连接成功: {ip}", device_id, device.device_name)
+            return {"ok": True, "message": f"已连接到 {ip}:5555"}
+        else:
+            log_operation(db, "adb_connect_failed", f"ADB连接失败: {result.stdout}", device_id, device.device_name)
+            return {"ok": False, "detail": f"连接失败: {result.stdout}"}
+    
+    except Exception as e:
+        log_operation(db, "adb_connect_error", f"ADB连接异常: {str(e)}", device_id, device.device_name)
+        return {"ok": False, "detail": str(e)}
+
+@app.post("/api/v1/devices/{device_id}/adb/disconnect")
+async def adb_disconnect_device(device_id: int, db: Session = Depends(get_db)):
+    """断开ADB连接"""
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    
+    ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
+    if not ip or ip == "0.0.0.0":
+        raise HTTPException(status_code=400, detail="Device has no valid IP for ADB")
+    
+    adb_path = resolve_adb_path()
+    
+    try:
+        result = subprocess.run([adb_path, "disconnect", f"{ip}:5555"], capture_output=True, text=True, timeout=10)
+        
+        log_operation(db, "adb_disconnect", f"ADB断开连接: {ip}", device_id, device.device_name)
+        return {"ok": True, "message": f"已断开与 {ip}:5555 的连接"}
+    
+    except Exception as e:
+        log_operation(db, "adb_disconnect_error", f"ADB断开连接异常: {str(e)}", device_id, device.device_name)
+        return {"ok": False, "detail": str(e)}
+
+# 生成Scrcpy启动命令（供用户手动执行）
+@app.get("/api/v1/devices/{device_id}/scrcpy/command")
+async def get_scrcpy_command(device_id: int, db: Session = Depends(get_db)):
+    """获取Scrcpy启动命令（供用户手动执行）"""
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    
+    ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
+    if not ip or ip == "0.0.0.0":
+        raise HTTPException(status_code=400, detail="Device has no valid IP for ADB")
+    
+    scrcpy_path = get_scrcpy_path()
+    if not scrcpy_path:
+        return {"ok": False, "detail": "Scrcpy未安装"}
+    
+    # 生成命令
+    command = f'"{scrcpy_path}" --serial {ip}:5555 --no-audio --max-fps 30 --bit-rate 2M --max-size 1024'
+    
+    return {
+        "ok": True,
+        "command": command,
+        "description": "在命令行中执行此命令启动Scrcpy",
+        "steps": [
+            "1. 确保已安装Scrcpy",
+            "2. 确保电视已开启ADB调试",
+            "3. 复制上面的命令到命令行执行",
+            "4. 等待Scrcpy窗口出现"
+        ]
+    }
+
 @app.post("/api/v1/devices/{device_id}/input")
 def device_input(device_id: int, action: str, key: str = None, x: int = None, y: int = None, db: Session = Depends(get_db)):
     device = db.query(Device).filter(Device.id == device_id).first()

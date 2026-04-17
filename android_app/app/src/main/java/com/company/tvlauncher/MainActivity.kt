@@ -1,8 +1,11 @@
 package com.company.tvlauncher
 
 import android.app.ActivityManager
+import android.app.AlertDialog
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -11,8 +14,6 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.TextView
-import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.work.Constraints
 import androidx.work.NetworkType
@@ -27,7 +28,23 @@ class MainActivity : AppCompatActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var lastPolicyExecutionTime = 0L
     private val EXECUTION_COOLDOWN = 5000L // 5 seconds cooldown to prevent loops
-    private var lastEscapeToastTime = 0L
+
+    // 保活检查的Handler和Runnable
+    private var keepAliveHandler: Handler? = null
+    private var keepAliveRunnable: Runnable? = null
+
+    private val policyUpdateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == "com.company.tvlauncher.POLICY_UPDATED") {
+                // 策略已更新，立即执行新策略（后台推送的策略更新视为用户主动操作）
+                mainHandler.post {
+                    android.util.Log.d("MainActivity", "收到策略更新广播，执行策略")
+                    val policyStore = PolicyStore(this@MainActivity)
+                    forceExecutePolicy(policyStore, force = true, userTriggered = true)
+                }
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -40,27 +57,89 @@ class MainActivity : AppCompatActivity() {
             showPasswordDialog(policyStore)
         }
         findViewById<Button>(R.id.executeBtn).setOnClickListener {
-            forceExecutePolicy(policyStore)
+            // 用户手动点击按钮执行策略
+            android.util.Log.d("MainActivity", "按钮点击触发策略执行")
+            forceExecutePolicy(policyStore, userTriggered = true)
         }
+
+        // 注册策略更新广播接收器
+        val filter = IntentFilter("com.company.tvlauncher.POLICY_UPDATED")
+        registerReceiver(policyUpdateReceiver, filter)
 
         // Schedule periodic sync every 15 mins (minimum allowed by WorkManager)
         schedulePeriodicSync()
+
+        // 启动前台服务，防止被系统清理
+        val foregroundIntent = Intent(this, KeepAliveForegroundService::class.java)
+        startService(foregroundIntent)
     }
 
-    private fun forceExecutePolicy(policyStore: PolicyStore) {
+    private fun forceExecutePolicy(policyStore: PolicyStore, force: Boolean = false, userTriggered: Boolean = false) {
         val policy = policyStore.getPolicy()
-        
+
         // 检查策略是否有效
         if (!isPolicyValid(policy)) {
             showNoPolicyDialog()
             return
         }
-        
-        if (policy.mode == "app") {
-            cleanupBackgroundApps(policy.targetAppPackage)
+
+        val now = System.currentTimeMillis()
+
+        // 用户主动触发（如按返回键）：立即执行，重置冷却时间
+        if (userTriggered) {
+            android.util.Log.d("MainActivity", "用户主动触发策略执行")
+            lastPolicyExecutionTime = now
+            lastHdmiSwitchTime = now
+        } else {
+            // 自动触发：需要检查冷却期
+            // HDMI模式：检查30秒冷却期（避免自动循环）
+            if (policy.mode == "hdmi" && now - lastHdmiSwitchTime < HDMI_SWITCH_COOLDOWN) {
+                android.util.Log.d("MainActivity", "HDMI切换冷却中(${(now - lastHdmiSwitchTime)/1000}秒)，跳过自动执行")
+                return
+            }
+
+            // 防抖检查：非强制模式下，5秒内不重复执行
+            if (!force && now - lastPolicyExecutionTime < EXECUTION_COOLDOWN) {
+                android.util.Log.d("MainActivity", "策略执行冷却中(${(now - lastPolicyExecutionTime)/1000}秒)，跳过")
+                return
+            }
+
+            // 更新执行时间
+            lastPolicyExecutionTime = now
+            lastHdmiSwitchTime = now
         }
-        LauncherExecutor(this).execute(policy)
-        lastPolicyExecutionTime = System.currentTimeMillis()
+
+        // 策略更新时强制清理所有后台应用，但保留目标APP和系统应用
+        val keepPackages = mutableListOf<String>()
+
+        when (policy.mode) {
+            "app" -> {
+                // APP模式：保留目标APP
+                keepPackages.add(policy.targetAppPackage)
+                android.util.Log.d("MainActivity", "APP模式策略执行，保留: ${policy.targetAppPackage}")
+            }
+            "hdmi" -> {
+                // HDMI模式：保留小米电视播放器APP，这是HDMI切换所必需的
+                keepPackages.add(LauncherExecutor.HDMI_TV_PLAYER_PACKAGE)
+                android.util.Log.d("MainActivity", "HDMI模式策略执行，保留: ${LauncherExecutor.HDMI_TV_PLAYER_PACKAGE}")
+            }
+        }
+
+        // 清理后台应用，但保留指定的包名
+        val executor = LauncherExecutor(this)
+        executor.cleanupBackgroundApps(keepPackages)
+
+        // 执行新策略
+        executor.execute(policy)
+
+        // 启动保活服务，确保目标APP持续运行
+        startKeepAliveService(policy)
+
+        // 同时启动前台服务
+        val foregroundIntent = Intent(this, KeepAliveForegroundService::class.java)
+        startService(foregroundIntent)
+
+        android.util.Log.d("MainActivity", "策略已执行: ${policy.mode}模式")
     }
     
     private fun isPolicyValid(policy: LaunchPolicy): Boolean {
@@ -110,6 +189,33 @@ class MainActivity : AppCompatActivity() {
             e.printStackTrace()
         }
     }
+    
+    private fun cleanupBackgroundApps(keepPackages: List<String> = emptyList()) {
+        try {
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val tasks = am.runningAppProcesses
+            if (tasks != null) {
+                for (task in tasks) {
+                    val processName = task.processName
+                    
+                    // 检查是否需要保留此进程
+                    val shouldKeep = keepPackages.any { keepPackage ->
+                        processName.contains(keepPackage)
+                    }
+                    
+                    // 只清理非系统应用、非本应用、且不在保留列表中的应用
+                    if (processName != packageName && 
+                        !processName.startsWith("com.android.") &&
+                        !processName.startsWith("android.") &&
+                        !shouldKeep) {
+                        am.killBackgroundProcesses(processName)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
 
     private fun showPasswordDialog(policyStore: PolicyStore) {
         val input = EditText(this).apply {
@@ -134,8 +240,6 @@ class MainActivity : AppCompatActivity() {
                 val pwd = input.text.toString()
                 if (pwd == policyStore.getSettingsPassword()) {
                     startActivity(Intent(this, SettingsActivity::class.java))
-                } else {
-                    Toast.makeText(this, "密码错误", Toast.LENGTH_SHORT).show()
                 }
             }
             .setNegativeButton("取消", null)
@@ -146,21 +250,22 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         val policyStore = PolicyStore(this)
         refreshStatus(policyStore)
-        
-        // When returning to MainActivity (e.g. via Back or Home), 
+
+        // 启动前台服务，防止被系统清理
+        val foregroundIntent = Intent(this, KeepAliveForegroundService::class.java)
+        startService(foregroundIntent)
+
+        // When returning to MainActivity (e.g. via Back or Home),
         // check if we need to re-execute policy
         val now = System.currentTimeMillis()
         if (!policyStore.isEscapeModeActive() && now - lastPolicyExecutionTime > EXECUTION_COOLDOWN) {
             forceExecutePolicy(policyStore)
-        } else if (policyStore.isEscapeModeActive() && now - lastEscapeToastTime > 5000) {
-            lastEscapeToastTime = now
-            Toast.makeText(this, "维护模式中（临时允许退出/更新），将自动恢复策略", Toast.LENGTH_LONG).show()
         }
 
         ioExecutor.execute {
             val net = NetworkInfoProvider(this).collect()
             val api = RemoteApi(this, policyStore)
-            
+
             // Try online operations
             val registered = api.registerIfNeeded("MeetingTV", net)
             var heartbeatSuccess = api.heartbeat(net)
@@ -169,7 +274,7 @@ class MainActivity : AppCompatActivity() {
                 api.registerIfNeeded("MeetingTV", net)
                 heartbeatSuccess = api.heartbeat(net)
             }
-            
+
             // Check for OTA update
             val updateInfo = api.checkUpdate()
 
@@ -182,14 +287,24 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onPause() {
+        super.onPause()
+        // 启动保活服务，确保策略APP一直在前台
+        val policyStore = PolicyStore(this)
+        val policy = policyStore.getPolicy()
+        if (isPolicyValid(policy)) {
+            startKeepAliveService(policy)
+        }
+    }
+
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
             val policyStore = PolicyStore(this)
             if (policyStore.isEscapeModeActive() || !policyStore.getKioskEnabled()) {
                 return super.onKeyDown(keyCode, event)
             }
-            // User pressed back - cleanup and re-enforce policy
-            forceExecutePolicy(policyStore)
+            // 用户按返回键 - 触发保活，重置冷却时间
+            forceExecutePolicy(policyStore, userTriggered = true)
             return true
         }
         return super.onKeyDown(keyCode, event)
@@ -237,6 +352,92 @@ class MainActivity : AppCompatActivity() {
         val policyStore = PolicyStore(this)
         if (policyStore.isEscapeModeActive() || !policyStore.getKioskEnabled()) {
             super.onBackPressed()
+        }
+    }
+
+    private var lastHdmiSwitchTime = 0L
+    private val HDMI_SWITCH_COOLDOWN = 30000L // 30秒内不重复检查HDMI保活
+
+    private fun startKeepAliveService(policy: LaunchPolicy) {
+        // 停止之前的保活检查
+        keepAliveHandler?.removeCallbacks(keepAliveRunnable!!)
+
+        // 启动新的保活检查
+        keepAliveHandler = Handler(Looper.getMainLooper())
+
+        val executor = LauncherExecutor(this)
+
+        keepAliveRunnable = object : Runnable {
+            override fun run() {
+                try {
+                    when (policy.mode) {
+                        "app" -> {
+                            // APP模式：检查目标APP是否在运行
+                            if (!executor.isAppRunning(policy.targetAppPackage)) {
+                                android.util.Log.d("MainActivity", "目标APP未运行，重新启动: ${policy.targetAppPackage}")
+                                executor.launchApp(policy.targetAppPackage)
+                            }
+                        }
+                        "hdmi" -> {
+                            // HDMI模式：只进行状态监控，不重复执行HDMI切换
+                            // HDMI切换是一次性的，切换完成后不需要再干预
+
+                            val now = System.currentTimeMillis()
+                            val timeSinceSwitch = now - lastHdmiSwitchTime
+
+                            // HDMI切换后30秒内不做任何保活检查，让系统稳定
+                            if (timeSinceSwitch < HDMI_SWITCH_COOLDOWN) {
+                                android.util.Log.d("MainActivity", "HDMI切换后冷却期(${timeSinceSwitch/1000}秒)，跳过保活检查")
+                            } else {
+                                // 冷却期后，只检查播放器进程是否存在，不重复切换
+                                val isPlayerRunning = executor.isAppRunning(LauncherExecutor.HDMI_TV_PLAYER_PACKAGE)
+                                android.util.Log.d("MainActivity", "HDMI保活检查: 播放器运行=$isPlayerRunning")
+
+                                // 只有播放器完全被杀死时才启动（极罕见情况）
+                                // 正常情况下HDMI信号源面板由系统UI控制，不需要保活
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("MainActivity", "保活检查异常: ${e.message}")
+                    e.printStackTrace()
+                }
+
+                // 每30秒检查一次（大幅降低检查频率）
+                keepAliveHandler?.postDelayed(this, 30000)
+            }
+        }
+
+        // 延迟10秒后开始首次保活检查（给HDMI切换足够时间稳定）
+        keepAliveHandler?.postDelayed(keepAliveRunnable!!, 10000)
+    }
+
+    private fun getCurrentFocusPackage(): String? {
+        return try {
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val tasks = am.getRunningTasks(1)
+            if (tasks != null && tasks.isNotEmpty()) {
+                tasks[0].topActivity?.packageName
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // 清理保活Handler
+        keepAliveHandler?.removeCallbacks(keepAliveRunnable!!)
+        keepAliveHandler = null
+        keepAliveRunnable = null
+
+        // 注销广播接收器
+        try {
+            unregisterReceiver(policyUpdateReceiver)
+        } catch (e: Exception) {
+            // 忽略未注册的情况
         }
     }
 

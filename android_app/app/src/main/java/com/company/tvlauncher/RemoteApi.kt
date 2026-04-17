@@ -140,11 +140,21 @@ class RemoteApi(
             } else {
                 null
             }
-            policyStore.applyRemotePolicy(
+
+            // 应用远程策略，返回是否发生变化
+            val policyChanged = policyStore.applyRemotePolicy(
                 mode = mode.ifBlank { null },
                 targetApp = app.ifBlank { null },
                 hdmiPort = hdmi
             )
+
+            // 只有策略真正变化时才发送广播，避免重复执行
+            if (policyChanged && mode.isNotBlank()) {
+                android.util.Log.d("RemoteApi", "策略已变化，发送更新广播")
+                val intent = android.content.Intent("com.company.tvlauncher.POLICY_UPDATED")
+                context.sendBroadcast(intent)
+            }
+
             return true
         }
     }

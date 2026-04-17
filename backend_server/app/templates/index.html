@@ -239,6 +239,7 @@
         let currentRoomDeviceId = null;
         let screenWebSocket = null;
         let screenStreamInterval = null;
+        let scrcpyCheckInterval = null;
 
         async function loadData() {
             const policies = await (await fetch('/api/v1/policies')).json();
@@ -530,37 +531,105 @@
             document.getElementById('screenshotLoading').style.display = 'block';
             document.getElementById('screenshotImg').style.display = 'none';
             
-            // 添加实时屏幕流选项
+            // 清空控制区域
             const controlsDiv = document.querySelector('.remote-controls');
-            if (!document.getElementById('streamToggleBtn')) {
-                const streamToggle = document.createElement('div');
-                streamToggle.style.marginBottom = '15px';
-                streamToggle.innerHTML = `
-                    <button id="streamToggleBtn" class="btn btn-success" onclick="toggleScreenStream()">
-                        ▶ 开启实时屏幕流
-                    </button>
-                    <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 5px;">
-                        💡 实时屏幕流提供更流畅的远程控制体验
-                    </div>
-                `;
-                controlsDiv.insertBefore(streamToggle, controlsDiv.firstChild);
-            }
+            controlsDiv.innerHTML = '';
             
-            const refreshBtn = document.getElementById('refreshScreenshotBtn');
-            refreshBtn.onclick = () => takeScreenshot(deviceId, deviceName);
+            // 添加Scrcpy控制选项
+            const scrcpyControl = document.createElement('div');
+            scrcpyControl.style.marginBottom = '20px';
+            scrcpyControl.innerHTML = `
+                <div style="margin-bottom: 10px;">
+                    <h4 style="margin: 0 0 10px 0; color: var(--text-primary);">🔧 Scrcpy高级控制</h4>
+                    <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 15px;">
+                        💡 使用Scrcpy实现真正的实时屏幕镜像和低延迟控制
+                    </div>
+                </div>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button id="checkScrcpyBtn" class="btn btn-info" onclick="checkScrcpyInstallation()">
+                        🔍 检查Scrcpy
+                    </button>
+                    <button id="startScrcpyBtn" class="btn btn-success" onclick="startScrcpySession(${deviceId})">
+                        🚀 启动Scrcpy
+                    </button>
+                    <button id="stopScrcpyBtn" class="btn btn-danger" onclick="stopScrcpySession(${deviceId})" style="display: none;">
+                        ⏹ 停止Scrcpy
+                    </button>
+                    <button id="getScrcpyCmdBtn" class="btn btn-secondary" onclick="getScrcpyCommand(${deviceId})">
+                        📋 获取命令
+                    </button>
+                </div>
+                <div id="scrcpyStatus" style="margin-top: 10px; font-size: 0.85rem; color: var(--text-secondary);"></div>
+            `;
+            controlsDiv.appendChild(scrcpyControl);
+            
+            // 添加ADB连接控制
+            const adbControl = document.createElement('div');
+            adbControl.style.marginBottom = '20px';
+            adbControl.innerHTML = `
+                <div style="margin-bottom: 10px;">
+                    <h4 style="margin: 0 0 10px 0; color: var(--text-primary);">🔗 ADB连接管理</h4>
+                </div>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button id="adbConnectBtn" class="btn btn-primary" onclick="adbConnectDevice(${deviceId})">
+                        🔌 连接ADB
+                    </button>
+                    <button id="adbDisconnectBtn" class="btn btn-warning" onclick="adbDisconnectDevice(${deviceId})">
+                        🔋 断开ADB
+                    </button>
+                </div>
+                <div id="adbStatus" style="margin-top: 10px; font-size: 0.85rem; color: var(--text-secondary);"></div>
+            `;
+            controlsDiv.appendChild(adbControl);
+            
+            // 添加传统截图控制
+            const screenshotControl = document.createElement('div');
+            screenshotControl.style.marginBottom = '20px';
+            screenshotControl.innerHTML = `
+                <div style="margin-bottom: 10px;">
+                    <h4 style="margin: 0 0 10px 0; color: var(--text-primary);">📸 传统截图控制</h4>
+                    <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 15px;">
+                        💡 基础截图功能，适合简单操作
+                    </div>
+                </div>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button id="refreshScreenshotBtn" class="btn btn-secondary" onclick="takeScreenshot(${deviceId}, '${deviceName}')">
+                        🔄 刷新截图
+                    </button>
+                    <button class="btn btn-outline-secondary" onclick="showScrcpyHelp()">
+                        ❓ 使用帮助
+                    </button>
+                </div>
+            `;
+            controlsDiv.appendChild(screenshotControl);
+            
+            // 添加遥控器按钮
+            const remoteControl = document.createElement('div');
+            remoteControl.innerHTML = `
+                <div style="margin-bottom: 10px;">
+                    <h4 style="margin: 0 0 10px 0; color: var(--text-primary);">🎮 遥控器按钮</h4>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+                    <button class="btn btn-outline-primary" onclick="sendKey('KEYCODE_DPAD_UP')">⬆️ 上</button>
+                    <button class="btn btn-outline-primary" onclick="sendKey('KEYCODE_DPAD_LEFT')">⬅️ 左</button>
+                    <button class="btn btn-outline-primary" onclick="sendKey('KEYCODE_DPAD_RIGHT')">➡️ 右</button>
+                    <button class="btn btn-outline-primary" onclick="sendKey('KEYCODE_DPAD_DOWN')">⬇️ 下</button>
+                    <button class="btn btn-outline-success" onclick="sendKey('KEYCODE_ENTER')">⏎ 确定</button>
+                    <button class="btn btn-outline-warning" onclick="sendKey('KEYCODE_BACK')">↩️ 返回</button>
+                    <button class="btn btn-outline-info" onclick="sendKey('KEYCODE_HOME')">🏠 主页</button>
+                    <button class="btn btn-outline-secondary" onclick="sendKey('KEYCODE_MENU')">📋 菜单</button>
+                    <button class="btn btn-outline-danger" onclick="sendKey('KEYCODE_VOLUME_UP')">🔊 音量+</button>
+                    <button class="btn btn-outline-danger" onclick="sendKey('KEYCODE_VOLUME_DOWN')">🔉 音量-</button>
+                    <button class="btn btn-outline-dark" onclick="sendKey('KEYCODE_POWER')">⏻ 电源</button>
+                </div>
+            `;
+            controlsDiv.appendChild(remoteControl);
 
-            try {
-                const resp = await fetch(`/api/v1/devices/${deviceId}/screenshot`);
-                const result = await resp.json();
-                if (result.ok) {
-                    const img = document.getElementById('screenshotImg');
-                    img.src = result.url;
-                    img.style.display = 'block';
-                    document.getElementById('screenshotLoading').style.display = 'none';
-                } else {
-                    alert('画面截取失败: ' + (result.detail || '未知错误'));
-                }
-            } catch (e) { alert('网络请求失败'); }
+            // 初始加载截图
+            takeScreenshot(deviceId, deviceName);
+            
+            // 检查Scrcpy状态
+            checkScrcpyInstallation();
         }
 
         async function sendKey(key) {
@@ -733,6 +802,277 @@
                 btn.innerText = oldText;
                 btn.disabled = false;
             }
+        }
+
+        // ==================== Scrcpy相关函数 ====================
+        
+        async function checkScrcpyInstallation() {
+            try {
+                const resp = await fetch('/api/v1/scrcpy/check');
+                const result = await resp.json();
+                
+                const statusDiv = document.getElementById('scrcpyStatus');
+                if (result.ok && result.installed) {
+                    statusDiv.innerHTML = `<span style="color: #28a745;">✅ ${result.message}</span>`;
+                    document.getElementById('checkScrcpyBtn').innerHTML = '✅ Scrcpy已安装';
+                    document.getElementById('checkScrcpyBtn').className = 'btn btn-success';
+                } else {
+                    statusDiv.innerHTML = `<span style="color: #dc3545;">❌ ${result.message}</span>`;
+                    document.getElementById('checkScrcpyBtn').innerHTML = '❌ Scrcpy未安装';
+                    document.getElementById('checkScrcpyBtn').className = 'btn btn-danger';
+                }
+            } catch (error) {
+                const statusDiv = document.getElementById('scrcpyStatus');
+                statusDiv.innerHTML = `<span style="color: #dc3545;">❌ 检查失败: ${error.message}</span>`;
+            }
+        }
+        
+        async function startScrcpySession(deviceId) {
+            if (!confirm('启动Scrcpy将打开一个新窗口进行实时屏幕控制。确认启动吗？')) {
+                return;
+            }
+            
+            const startBtn = document.getElementById('startScrcpyBtn');
+            const stopBtn = document.getElementById('stopScrcpyBtn');
+            const statusDiv = document.getElementById('scrcpyStatus');
+            
+            startBtn.disabled = true;
+            startBtn.innerHTML = '⏳ 启动中...';
+            
+            try {
+                // 首先连接ADB
+                const adbResp = await fetch(`/api/v1/devices/${deviceId}/adb/connect`, { method: 'POST' });
+                const adbResult = await adbResp.json();
+                
+                if (!adbResult.ok) {
+                    statusDiv.innerHTML = `<span style="color: #dc3545;">❌ ADB连接失败: ${adbResult.detail}</span>`;
+                    startBtn.disabled = false;
+                    startBtn.innerHTML = '🚀 启动Scrcpy';
+                    return;
+                }
+                
+                // 启动Scrcpy会话
+                const resp = await fetch(`/api/v1/devices/${deviceId}/scrcpy/start`, { method: 'POST' });
+                const result = await resp.json();
+                
+                if (result.ok) {
+                    statusDiv.innerHTML = `<span style="color: #28a745;">✅ ${result.message}</span>`;
+                    startBtn.style.display = 'none';
+                    stopBtn.style.display = 'inline-block';
+                    
+                    // 开始轮询检查状态
+                    startScrcpyStatusPolling(deviceId);
+                } else {
+                    statusDiv.innerHTML = `<span style="color: #dc3545;">❌ ${result.detail}</span>`;
+                    startBtn.disabled = false;
+                    startBtn.innerHTML = '🚀 启动Scrcpy';
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `<span style="color: #dc3545;">❌ 启动失败: ${error.message}</span>`;
+                startBtn.disabled = false;
+                startBtn.innerHTML = '🚀 启动Scrcpy';
+            }
+        }
+        
+        async function stopScrcpySession(deviceId) {
+            const stopBtn = document.getElementById('stopScrcpyBtn');
+            const startBtn = document.getElementById('startScrcpyBtn');
+            const statusDiv = document.getElementById('scrcpyStatus');
+            
+            stopBtn.disabled = true;
+            stopBtn.innerHTML = '⏳ 停止中...';
+            
+            try {
+                const resp = await fetch(`/api/v1/devices/${deviceId}/scrcpy/stop`, { method: 'POST' });
+                const result = await resp.json();
+                
+                if (result.ok) {
+                    statusDiv.innerHTML = `<span style="color: #28a745;">✅ ${result.message}</span>`;
+                    stopBtn.style.display = 'none';
+                    startBtn.style.display = 'inline-block';
+                    startBtn.disabled = false;
+                    startBtn.innerHTML = '🚀 启动Scrcpy';
+                    
+                    // 停止状态轮询
+                    stopScrcpyStatusPolling();
+                } else {
+                    statusDiv.innerHTML = `<span style="color: #dc3545;">❌ ${result.detail}</span>`;
+                    stopBtn.disabled = false;
+                    stopBtn.innerHTML = '⏹ 停止Scrcpy';
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `<span style="color: #dc3545;">❌ 停止失败: ${error.message}</span>`;
+                stopBtn.disabled = false;
+                stopBtn.innerHTML = '⏹ 停止Scrcpy';
+            }
+        }
+        
+        function startScrcpyStatusPolling(deviceId) {
+            // 停止现有的轮询
+            stopScrcpyStatusPolling();
+            
+            // 开始新的轮询
+            scrcpyCheckInterval = setInterval(async () => {
+                try {
+                    const resp = await fetch(`/api/v1/devices/${deviceId}/scrcpy/status`);
+                    const result = await resp.json();
+                    
+                    const statusDiv = document.getElementById('scrcpyStatus');
+                    if (result.ok && result.status === 'running') {
+                        statusDiv.innerHTML = `<span style="color: #28a745;">✅ Scrcpy运行中 (PID: ${result.pid})</span>`;
+                    } else if (result.ok && result.status === 'stopped') {
+                        statusDiv.innerHTML = `<span style="color: #ffc107;">⚠️ Scrcpy已停止 (退出码: ${result.exit_code})</span>`;
+                        stopScrcpyStatusPolling();
+                        
+                        // 更新按钮状态
+                        const stopBtn = document.getElementById('stopScrcpyBtn');
+                        const startBtn = document.getElementById('startScrcpyBtn');
+                        stopBtn.style.display = 'none';
+                        startBtn.style.display = 'inline-block';
+                        startBtn.disabled = false;
+                        startBtn.innerHTML = '🚀 启动Scrcpy';
+                    }
+                } catch (error) {
+                    // 忽略轮询错误
+                }
+            }, 2000); // 每2秒检查一次
+        }
+        
+        function stopScrcpyStatusPolling() {
+            if (scrcpyCheckInterval) {
+                clearInterval(scrcpyCheckInterval);
+                scrcpyCheckInterval = null;
+            }
+        }
+        
+        async function getScrcpyCommand(deviceId) {
+            try {
+                const resp = await fetch(`/api/v1/devices/${deviceId}/scrcpy/command`);
+                const result = await resp.json();
+                
+                if (result.ok) {
+                    const command = result.command;
+                    const steps = result.steps.join('\n');
+                    
+                    const message = `📋 Scrcpy启动命令:\n\n${command}\n\n📝 使用步骤:\n${steps}\n\n💡 提示: 复制命令到命令行执行即可启动Scrcpy`;
+                    alert(message);
+                } else {
+                    alert(`❌ 获取命令失败: ${result.detail}`);
+                }
+            } catch (error) {
+                alert(`❌ 获取命令失败: ${error.message}`);
+            }
+        }
+        
+        async function adbConnectDevice(deviceId) {
+            const statusDiv = document.getElementById('adbStatus');
+            const connectBtn = document.getElementById('adbConnectBtn');
+            
+            connectBtn.disabled = true;
+            connectBtn.innerHTML = '⏳ 连接中...';
+            
+            try {
+                const resp = await fetch(`/api/v1/devices/${deviceId}/adb/connect`, { method: 'POST' });
+                const result = await resp.json();
+                
+                if (result.ok) {
+                    statusDiv.innerHTML = `<span style="color: #28a745;">✅ ${result.message}</span>`;
+                    connectBtn.innerHTML = '✅ 已连接';
+                    connectBtn.className = 'btn btn-success';
+                } else {
+                    statusDiv.innerHTML = `<span style="color: #dc3545;">❌ ${result.detail}</span>`;
+                    connectBtn.innerHTML = '🔌 连接ADB';
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `<span style="color: #dc3545;">❌ 连接失败: ${error.message}</span>`;
+                connectBtn.innerHTML = '🔌 连接ADB';
+            } finally {
+                connectBtn.disabled = false;
+            }
+        }
+        
+        async function adbDisconnectDevice(deviceId) {
+            const statusDiv = document.getElementById('adbStatus');
+            const disconnectBtn = document.getElementById('adbDisconnectBtn');
+            
+            disconnectBtn.disabled = true;
+            disconnectBtn.innerHTML = '⏳ 断开中...';
+            
+            try {
+                const resp = await fetch(`/api/v1/devices/${deviceId}/adb/disconnect`, { method: 'POST' });
+                const result = await resp.json();
+                
+                if (result.ok) {
+                    statusDiv.innerHTML = `<span style="color: #28a745;">✅ ${result.message}</span>`;
+                    disconnectBtn.innerHTML = '✅ 已断开';
+                    disconnectBtn.className = 'btn btn-secondary';
+                    
+                    // 重置连接按钮
+                    const connectBtn = document.getElementById('adbConnectBtn');
+                    connectBtn.innerHTML = '🔌 连接ADB';
+                    connectBtn.className = 'btn btn-primary';
+                } else {
+                    statusDiv.innerHTML = `<span style="color: #dc3545;">❌ ${result.detail}</span>`;
+                    disconnectBtn.innerHTML = '🔋 断开ADB';
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `<span style="color: #dc3545;">❌ 断开失败: ${error.message}</span>`;
+                disconnectBtn.innerHTML = '🔋 断开ADB';
+            } finally {
+                disconnectBtn.disabled = false;
+            }
+        }
+        
+        function showScrcpyHelp() {
+            const helpText = `📖 Scrcpy使用帮助：
+
+🔧 什么是Scrcpy？
+Scrcpy是一个开源的Android屏幕镜像工具，可以通过ADB无线调试实现：
+• 实时屏幕镜像（低延迟）
+• 鼠标点击控制
+• 键盘输入支持
+• 文件传输功能
+
+🚀 安装步骤：
+1. 下载Scrcpy: https://github.com/Genymobile/scrcpy/releases
+2. 解压到任意目录（如 C:\\scrcpy）
+3. 确保ADB已安装（通常包含在Scrcpy包中）
+
+📱 电视端设置：
+1. 进入电视设置 → 关于本机
+2. 连续点击"版本号"7次开启开发者模式
+3. 返回设置 → 开发者选项
+4. 开启"USB调试"和"无线调试"
+
+🔗 连接步骤：
+1. 在管理后台点击"检查Scrcpy"
+2. 点击"连接ADB"建立连接
+3. 点击"启动Scrcpy"开始控制
+
+💡 高级功能：
+• 支持横屏/竖屏切换
+• 支持屏幕录制
+• 支持音频传输（需要Android 11+）
+• 支持多设备同时控制
+
+⚠️ 注意事项：
+• 确保电视和电脑在同一网络
+• 首次连接需要在电视上授权
+• 部分功能需要电视重启后生效`;
+            
+            alert(helpText);
+        }
+        
+        // 修改closeScreenshotModal函数，停止Scrcpy状态轮询
+        function closeScreenshotModal() {
+            // 停止Scrcpy状态轮询
+            stopScrcpyStatusPolling();
+            
+            // 停止实时屏幕流
+            stopScreenStream();
+            
+            document.getElementById('screenshotModal').style.display = 'none';
+            currentRemoteDeviceId = null;
         }
 
         // Init

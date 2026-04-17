@@ -118,10 +118,46 @@ cd android_app
 3. 设备重启或策略更新时自动执行新策略
 
 ### 远程控制
+
+#### 方式一：传统截图控制（基础功能）
 1. 在设备列表点击"远程控制"
-2. 开启实时屏幕流
+2. 点击"刷新截图"获取当前屏幕
 3. 点击屏幕图像进行控制
-4. 使用右侧按钮模拟遥控器操作
+4. 使用遥控器按钮模拟操作
+
+#### 方式二：Scrcpy高级控制（推荐）
+**Scrcpy是一个开源的Android屏幕镜像工具，提供真正的实时控制和低延迟体验。**
+
+##### 安装Scrcpy
+1. 下载Scrcpy: https://github.com/Genymobile/scrcpy/releases
+2. 解压到任意目录（如 `C:\scrcpy`）
+3. 确保ADB已安装（通常包含在Scrcpy包中）
+
+##### 电视端设置
+1. 进入电视设置 → 关于本机
+2. 连续点击"版本号"7次开启开发者模式
+3. 返回设置 → 开发者选项
+4. 开启"USB调试"和"无线调试"
+
+##### 使用步骤
+1. 在管理后台点击"远程控制"
+2. 点击"检查Scrcpy"验证安装
+3. 点击"连接ADB"建立连接
+4. 点击"启动Scrcpy"开始实时控制
+5. 或者点击"获取命令"手动执行Scrcpy
+
+##### Scrcpy高级功能
+- **实时屏幕镜像**：真正的低延迟画面传输
+- **鼠标控制**：直接点击电视屏幕
+- **键盘输入**：支持文本输入
+- **屏幕录制**：录制电视操作视频
+- **音频传输**：Android 11+支持音频
+- **多设备支持**：同时控制多台电视
+
+##### 手动启动命令
+```bash
+scrcpy --serial 192.168.1.100:5555 --no-audio --max-fps 30 --bit-rate 2M --max-size 1024
+```
 
 ### HDMI切换
 支持多种切换方法：
@@ -149,7 +185,27 @@ cd android_app
 - 尝试不同的HDMI端口
 - 查看电视型号支持的切换方法
 
-#### 4. 实时屏幕流卡顿
+#### 4. Scrcpy连接失败
+- **Scrcpy未安装**：下载并安装Scrcpy
+- **ADB未授权**：在电视上确认ADB授权
+- **无线调试未开启**：在电视开发者选项中开启无线调试
+- **IP地址错误**：确认电视IP地址正确
+- **防火墙阻止**：检查防火墙是否阻止ADB连接（端口5555）
+
+#### 5. Scrcpy画面卡顿
+- **降低分辨率**：使用 `--max-size 800` 参数
+- **降低帧率**：使用 `--max-fps 15` 参数
+- **降低码率**：使用 `--bit-rate 1M` 参数
+- **检查网络**：确保电视和电脑网络稳定
+- **使用USB连接**：USB连接比无线更稳定
+
+#### 6. Scrcpy无法控制
+- **检查ADB连接**：使用 `adb devices` 确认连接
+- **重新配对**：删除旧的ADB密钥重新配对
+- **重启电视**：重启电视后重试
+- **检查权限**：确保Scrcpy有足够权限
+
+#### 7. 实时屏幕流卡顿（传统方式）
 - 降低刷新频率（默认500ms）
 - 检查网络带宽
 - 调整截图分辨率
@@ -170,6 +226,47 @@ cd android_app
 1. **添加新的HDMI切换方法**: 修改`LauncherExecutor.kt`
 2. **增加新的API端点**: 修改`backend_server/app/main.py`
 3. **修改前端界面**: 编辑`backend_server/app/templates/index.html`
+4. **集成Scrcpy功能**: 使用现有的Scrcpy API端点
+
+### Scrcpy API参考
+后端提供了完整的Scrcpy集成API：
+
+#### 检查Scrcpy安装
+```http
+GET /api/v1/scrcpy/check
+```
+返回Scrcpy安装状态和路径。
+
+#### 启动Scrcpy会话
+```http
+POST /api/v1/devices/{device_id}/scrcpy/start
+```
+启动Scrcpy远程控制会话。
+
+#### 停止Scrcpy会话
+```http
+POST /api/v1/devices/{device_id}/scrcpy/stop
+```
+停止Scrcpy远程控制会话。
+
+#### 获取Scrcpy状态
+```http
+GET /api/v1/devices/{device_id}/scrcpy/status
+```
+获取Scrcpy会话运行状态。
+
+#### 获取Scrcpy命令
+```http
+GET /api/v1/devices/{device_id}/scrcpy/command
+```
+获取手动执行的Scrcpy命令。
+
+#### ADB连接管理
+```http
+POST /api/v1/devices/{device_id}/adb/connect
+POST /api/v1/devices/{device_id}/adb/disconnect
+```
+管理ADB无线调试连接。
 
 ### 测试
 运行综合测试：
