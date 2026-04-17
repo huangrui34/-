@@ -13,6 +13,7 @@ import android.view.KeyEvent
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.work.Constraints
@@ -53,10 +54,10 @@ class MainActivity : AppCompatActivity() {
         val policyStore = PolicyStore(this)
         refreshStatus(policyStore)
 
-        findViewById<Button>(R.id.openSettingsBtn).setOnClickListener {
+        findViewById<LinearLayout>(R.id.openSettingsBtn).setOnClickListener {
             showPasswordDialog(policyStore)
         }
-        findViewById<Button>(R.id.executeBtn).setOnClickListener {
+        findViewById<LinearLayout>(R.id.executeBtn).setOnClickListener {
             // 用户手动点击按钮执行策略
             android.util.Log.d("MainActivity", "按钮点击触发策略执行")
             forceExecutePolicy(policyStore, userTriggered = true)
@@ -474,8 +475,41 @@ class MainActivity : AppCompatActivity() {
     private fun refreshStatus(policyStore: PolicyStore) {
         val policy = policyStore.getPolicy()
         val token = policyStore.getDeviceToken()
-        val tokenHint = if (token != null) "已注册" else "未注册(请在设置中配置后台地址)"
-        findViewById<TextView>(R.id.statusText).text =
-            "$tokenHint\n当前策略: ${policy.mode} / ${policy.targetAppPackage} / HDMI${policy.targetHdmiPort}"
+
+        // 更新状态文本
+        val tokenHint = if (token != null) "设备已注册" else "设备未注册"
+        val policyDetail = when (policy.mode) {
+            "app" -> "目标应用: ${policy.targetAppPackage}"
+            "hdmi" -> "HDMI端口: ${policy.targetHdmiPort}"
+            else -> "未知模式"
+        }
+        findViewById<TextView>(R.id.statusText).text = "$tokenHint\n$policyDetail"
+
+        // 更新模式指示器
+        val modeIndicator = findViewById<TextView>(R.id.modeIndicator)
+        when (policy.mode) {
+            "app" -> {
+                modeIndicator.text = "APP模式"
+                modeIndicator.setTextColor(getColor(android.R.color.holo_green_light))
+            }
+            "hdmi" -> {
+                modeIndicator.text = "HDMI模式"
+                modeIndicator.setTextColor(getColor(android.R.color.holo_orange_light))
+            }
+            else -> {
+                modeIndicator.text = "未设置"
+                modeIndicator.setTextColor(getColor(android.R.color.darker_gray))
+            }
+        }
+
+        // 更新连接指示器
+        val connectionIndicator = findViewById<TextView>(R.id.connectionIndicator)
+        if (token != null) {
+            connectionIndicator.text = "已连接"
+            connectionIndicator.setTextColor(getColor(android.R.color.holo_blue_light))
+        } else {
+            connectionIndicator.text = "未连接"
+            connectionIndicator.setTextColor(getColor(android.R.color.darker_gray))
+        }
     }
 }
