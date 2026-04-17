@@ -114,6 +114,30 @@ class LauncherExecutor(private val context: Context) {
     }
 
     /**
+     * 强制停止并重新启动APP（用于投屏类APP刷新投屏码）
+     */
+    fun forceStopAndRestart(packageName: String) {
+        android.util.Log.d(TAG, "强制停止并重启APP: $packageName")
+
+        try {
+            // 1. 先强制停止APP
+            Runtime.getRuntime().exec(arrayOf("am", "force-stop", packageName)).waitFor()
+            android.util.Log.d(TAG, "已停止APP: $packageName")
+
+            // 2. 等待短暂时间确保进程完全停止
+            Thread.sleep(500)
+
+            // 3. 重新启动APP
+            launchApp(packageName)
+            android.util.Log.d(TAG, "已重新启动APP: $packageName")
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "强制重启APP失败: ${e.message}")
+            // 如果强制重启失败，尝试普通启动
+            launchApp(packageName)
+        }
+    }
+
+    /**
      * 检测指定APP是否在运行
      */
     fun isAppRunning(packageName: String): Boolean {

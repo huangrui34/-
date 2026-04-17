@@ -74,7 +74,7 @@ class MainActivity : AppCompatActivity() {
         startService(foregroundIntent)
     }
 
-    private fun forceExecutePolicy(policyStore: PolicyStore, force: Boolean = false, userTriggered: Boolean = false) {
+    private fun forceExecutePolicy(policyStore: PolicyStore, force: Boolean = false, userTriggered: Boolean = false, forceRestart: Boolean = false) {
         val policy = policyStore.getPolicy()
 
         // 检查策略是否有效
@@ -130,7 +130,13 @@ class MainActivity : AppCompatActivity() {
         executor.cleanupBackgroundApps(keepPackages)
 
         // 执行新策略
-        executor.execute(policy)
+        if (policy.mode == "app" && forceRestart) {
+            // APP模式 + 需要强制重启：先停止再启动（解决投屏码刷新问题）
+            android.util.Log.d("MainActivity", "APP模式强制重启: ${policy.targetAppPackage}")
+            executor.forceStopAndRestart(policy.targetAppPackage)
+        } else {
+            executor.execute(policy)
+        }
 
         // 启动保活服务，确保目标APP持续运行
         startKeepAliveService(policy)
@@ -258,8 +264,13 @@ class MainActivity : AppCompatActivity() {
         // When returning to MainActivity (e.g. via Back or Home),
         // check if we need to re-execute policy
         val now = System.currentTimeMillis()
+        val policy = policyStore.getPolicy()
+
         if (!policyStore.isEscapeModeActive() && now - lastPolicyExecutionTime > EXECUTION_COOLDOWN) {
-            forceExecutePolicy(policyStore)
+            // APP模式：强制重启APP以刷新投屏码
+            // HDMI模式：正常执行（不需要重启）
+            val forceRestart = policy.mode == "app"
+            forceExecutePolicy(policyStore, forceRestart = forceRestart)
         }
 
         ioExecutor.execute {
@@ -304,7 +315,10 @@ class MainActivity : AppCompatActivity() {
                 return super.onKeyDown(keyCode, event)
             }
             // 用户按返回键 - 触发保活，重置冷却时间
-            forceExecutePolicy(policyStore, userTriggered = true)
+            // APP模式下强制重启APP（解决投屏码刷新问题）
+            val policy = policyStore.getPolicy()
+            val forceRestart = policy.mode == "app"
+            forceExecutePolicy(policyStore, userTriggered = true, forceRestart = forceRestart)
             return true
         }
         return super.onKeyDown(keyCode, event)
