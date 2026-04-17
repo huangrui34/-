@@ -334,54 +334,49 @@ class LauncherExecutor(private val context: Context) {
         }
         val hdmiInputId = "com.droidlogic.tvinput/$hdmiInputService/$hwId"
 
-        // 方法1: 按键导航方式切换HDMI（最可靠）
+        // 方法1: 尝试使用TvInputManager API直接切换
         try {
-            // 先按HOME键返回主页，确保干净的启动环境
-            Runtime.getRuntime().exec(arrayOf("input", "keyevent", "3"))  // KEYCODE_HOME
-            Thread.sleep(800)
+            android.util.Log.d(TAG, "尝试TvInputManager API切换")
+
+            // 先按HOME键
+            Runtime.getRuntime().exec(arrayOf("input", "keyevent", "3")).waitFor()
+            Thread.sleep(500)
 
             // 设置系统输入源
             Runtime.getRuntime().exec(arrayOf("settings", "put", "system", "tv_input_id", hdmiInputId)).waitFor()
             android.util.Log.d(TAG, "已设置tv_input_id为: $hdmiInputId")
 
-            // 停止之前的播放器
-            Runtime.getRuntime().exec(arrayOf("am", "force-stop", "com.xiaomi.mitv.tvplayer")).waitFor()
-            Thread.sleep(300)
+            // 使用am命令直接调谐到指定HDMI输入
+            val tuneCommand = arrayOf(
+                "am", "start", "-a", "android.intent.action.VIEW",
+                "-d", "content://android.media.tv/passthrough/$hdmiInputId",
+                "-n", "com.xiaomi.mitv.tvplayer/.ExternalSourceActivity",
+                "--activity-clear-task", "--activity-new-task"
+            )
+            Runtime.getRuntime().exec(tuneCommand).waitFor()
+            android.util.Log.d(TAG, "已发送调谐命令到HDMI$port")
 
-            // 先启动Activity
-            val intent = Intent().apply {
-                setClassName("com.xiaomi.mitv.tvplayer", "com.xiaomi.mitv.tvplayer.ExternalSourceActivity")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-            }
-            context.startActivity(intent)
-            android.util.Log.d(TAG, "已启动ExternalSourceActivity")
+            Thread.sleep(1500)
 
-            // 在Activity完全加载前快速发送TV_INPUT键
-            // 小米电视的ExternalSourceActivity会在启动时自动选择HDMI1
-            // 我们需要快速打断这个自动选择过程
-            Thread.sleep(100)  // 等待Activity开始加载
-            Runtime.getRuntime().exec(arrayOf("input", "keyevent", "178"))  // TV_INPUT
-            android.util.Log.d(TAG, "已发送TV_INPUT键")
+            // 如果不是HDMI1，需要额外按键导航
+            if (port != 1) {
+                // 发送TV_INPUT键打开输入源菜单
+                Runtime.getRuntime().exec(arrayOf("input", "keyevent", "178")).waitFor()
+                Thread.sleep(1200)
 
-            // 等待输入源菜单加载
-            Thread.sleep(2000)
-
-            // 根据端口导航到对应的HDMI
-            // 输入源列表顺序通常是：HDMI1(位置0), HDMI2(位置1), HDMI3(位置2)...
-            // 所以HDMI1需要按0次，HDMI2按1次，HDMI3按2次
-            val downCount = port - 1
-            if (downCount > 0) {
+                // 根据端口导航
+                val downCount = port - 1
                 for (i in 1..downCount) {
-                    Runtime.getRuntime().exec(arrayOf("input", "keyevent", "20"))  // DPAD_DOWN
+                    Runtime.getRuntime().exec(arrayOf("input", "keyevent", "20")).waitFor()
                     Thread.sleep(400)
                 }
-                android.util.Log.d(TAG, "已导航到HDMI$port")
+
+                // 确认选择
+                Runtime.getRuntime().exec(arrayOf("input", "keyevent", "23")).waitFor()
+                android.util.Log.d(TAG, "已导航并选择HDMI$port")
             }
 
-            // 确认选择
-            Thread.sleep(300)
-            Runtime.getRuntime().exec(arrayOf("input", "keyevent", "23"))  // DPAD_CENTER
-            android.util.Log.d(TAG, "HDMI${port}切换完成（按键导航方式）")
+            android.util.Log.d(TAG, "HDMI${port}切换完成")
             return
         } catch (e: Exception) {
             android.util.Log.e(TAG, "HDMI切换方法1失败: ${e.message}")

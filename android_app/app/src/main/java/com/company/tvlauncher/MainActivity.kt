@@ -130,8 +130,13 @@ class MainActivity : AppCompatActivity() {
         val executor = LauncherExecutor(this)
         executor.cleanupBackgroundApps(keepPackages)
 
-        // 执行新策略
-        if (policy.mode == "app" && forceRestart) {
+        // 执行新策略 - HDMI模式在后台线程执行避免ANR
+        if (policy.mode == "hdmi") {
+            ioExecutor.execute {
+                android.util.Log.d("MainActivity", "HDMI模式后台线程执行切换")
+                executor.execute(policy)
+            }
+        } else if (policy.mode == "app" && forceRestart) {
             // APP模式 + 需要强制重启：先停止再启动（解决投屏码刷新问题）
             android.util.Log.d("MainActivity", "APP模式强制重启: ${policy.targetAppPackage}")
             executor.forceStopAndRestart(policy.targetAppPackage)
