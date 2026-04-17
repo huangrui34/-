@@ -319,14 +319,36 @@ class LauncherExecutor(private val context: Context) {
     private fun switchHdmi(port: Int) {
         android.util.Log.d(TAG, "开始HDMI${port}切换流程")
 
-        // 方法1: 使用settings命令设置输入源，然后启动播放器
+        // 获取正确的HDMI输入服务ID
+        val hdmiInputService = when (port) {
+            1 -> "com.droidlogic.tvinput/.services.Hdmi1InputService"
+            2 -> "com.droidlogic.tvinput/.services.Hdmi2InputService"
+            3 -> "com.droidlogic.tvinput/.services.Hdmi3InputService"
+            else -> "com.droidlogic.tvinput/.services.Hdmi1InputService"
+        }
+        val hwId = when (port) {
+            1 -> "HW5"
+            2 -> "HW6"
+            3 -> "HW7"
+            else -> "HW5"
+        }
+        val hdmiInputId = "com.droidlogic.tvinput/$hdmiInputService/$hwId"
+
+        // 方法1: 按键导航方式切换HDMI（最可靠）
         try {
-            // 设置HDMI输入源
-            val hdmiInputId = "com.droidlogic.tvinput/.services.Hdmi${port}InputService/HW${port}"
+            // 先按HOME键返回主页，确保干净的启动环境
+            Runtime.getRuntime().exec(arrayOf("input", "keyevent", "3"))  // KEYCODE_HOME
+            Thread.sleep(800)
+
+            // 设置系统输入源
             Runtime.getRuntime().exec(arrayOf("settings", "put", "system", "tv_input_id", hdmiInputId)).waitFor()
             android.util.Log.d(TAG, "已设置tv_input_id为: $hdmiInputId")
 
-            // 启动小米电视播放器的外部源Activity
+            // 停止之前的播放器
+            Runtime.getRuntime().exec(arrayOf("am", "force-stop", "com.xiaomi.mitv.tvplayer")).waitFor()
+            Thread.sleep(300)
+
+            // 先启动Activity
             val intent = Intent().apply {
                 setClassName("com.xiaomi.mitv.tvplayer", "com.xiaomi.mitv.tvplayer.ExternalSourceActivity")
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
@@ -334,89 +356,45 @@ class LauncherExecutor(private val context: Context) {
             context.startActivity(intent)
             android.util.Log.d(TAG, "已启动ExternalSourceActivity")
 
-            // 等待Activity启动
-            Thread.sleep(1500)
-
-            // 发送TV_INPUT键确保进入输入源选择
+            // 在Activity完全加载前快速发送TV_INPUT键
+            // 小米电视的ExternalSourceActivity会在启动时自动选择HDMI1
+            // 我们需要快速打断这个自动选择过程
+            Thread.sleep(100)  // 等待Activity开始加载
             Runtime.getRuntime().exec(arrayOf("input", "keyevent", "178"))  // TV_INPUT
-            Thread.sleep(800)
+            android.util.Log.d(TAG, "已发送TV_INPUT键")
 
-            // 根据端口选择对应的HDMI
-            when (port) {
-                1 -> {
-                    // HDMI1 - 通常需要按2次向下
-                    for (i in 1..2) {
-                        Runtime.getRuntime().exec(arrayOf("input", "keyevent", "20"))  // DPAD_DOWN
-                        Thread.sleep(300)
-                    }
+            // 等待输入源菜单加载
+            Thread.sleep(2000)
+
+            // 根据端口导航到对应的HDMI
+            // 输入源列表顺序通常是：HDMI1(位置0), HDMI2(位置1), HDMI3(位置2)...
+            // 所以HDMI1需要按0次，HDMI2按1次，HDMI3按2次
+            val downCount = port - 1
+            if (downCount > 0) {
+                for (i in 1..downCount) {
+                    Runtime.getRuntime().exec(arrayOf("input", "keyevent", "20"))  // DPAD_DOWN
+                    Thread.sleep(400)
                 }
-                2 -> {
-                    // HDMI2 - 通常需要按3次向下
-                    for (i in 1..3) {
-                        Runtime.getRuntime().exec(arrayOf("input", "keyevent", "20"))  // DPAD_DOWN
-                        Thread.sleep(300)
-                    }
-                }
-                3 -> {
-                    // HDMI3 - 通常需要按4次向下
-                    for (i in 1..4) {
-                        Runtime.getRuntime().exec(arrayOf("input", "keyevent", "20"))  // DPAD_DOWN
-                        Thread.sleep(300)
-                    }
-                }
+                android.util.Log.d(TAG, "已导航到HDMI$port")
             }
 
             // 确认选择
             Thread.sleep(300)
             Runtime.getRuntime().exec(arrayOf("input", "keyevent", "23"))  // DPAD_CENTER
-            android.util.Log.d(TAG, "HDMI${port}切换完成")
+            android.util.Log.d(TAG, "HDMI${port}切换完成（按键导航方式）")
             return
         } catch (e: Exception) {
             android.util.Log.e(TAG, "HDMI切换方法1失败: ${e.message}")
         }
 
-        // 方法2: 备用方案 - 使用按键模拟
+        // 方法2: 备用方案 - 打开设置页面让用户手动选择
         try {
-            android.util.Log.d(TAG, "尝试备用HDMI切换方法")
-
-            // 先按HOME键返回主页
-            Runtime.getRuntime().exec(arrayOf("input", "keyevent", "3"))  // KEYCODE_HOME
-            Thread.sleep(500)
-
-            // 启动电视播放器
-            val intent = Intent().apply {
-                setClassName("com.xiaomi.mitv.tvplayer", "com.xiaomi.mitv.tvplayer.ExternalSourceActivity")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
+            android.util.Log.w(TAG, "尝试备用方案，打开设置页面")
+            val intent = Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(intent)
-            Thread.sleep(2000)
-
-            // 使用HDMI专用键
-            Runtime.getRuntime().exec(arrayOf("input", "keyevent", "243"))  // HDMI1键
-            Thread.sleep(500)
-
-            // 如果不是HDMI1，需要导航选择
-            if (port != 1) {
-                Runtime.getRuntime().exec(arrayOf("input", "keyevent", "178"))  // TV_INPUT
-                Thread.sleep(800)
-
-                for (i in 1..(port + 1)) {
-                    Runtime.getRuntime().exec(arrayOf("input", "keyevent", "20"))  // DPAD_DOWN
-                    Thread.sleep(300)
-                }
-
-                Runtime.getRuntime().exec(arrayOf("input", "keyevent", "23"))  // DPAD_CENTER
-            }
-
-            android.util.Log.d(TAG, "备用HDMI切换完成")
         } catch (e: Exception) {
             android.util.Log.e(TAG, "HDMI切换失败: ${e.message}")
             e.printStackTrace()
-
-            // 最后备用方案：打开设置页面
-            android.util.Log.w(TAG, "无法自动切换HDMI$port，打开设置页面")
-            val intent = Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(intent)
         }
     }
 }

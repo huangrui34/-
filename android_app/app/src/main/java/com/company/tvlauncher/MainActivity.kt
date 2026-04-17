@@ -286,14 +286,12 @@ class MainActivity : AppCompatActivity() {
                 heartbeatSuccess = api.heartbeat(net)
             }
 
-            // Check for OTA update
-            val updateInfo = api.checkUpdate()
+            // OTA更新检查已禁用，避免弹出对话框干扰用户
+            // val updateInfo = api.checkUpdate()
 
             mainHandler.post {
                 refreshStatus(policyStore)
-                if (updateInfo != null) {
-                    showUpdateDialog(updateInfo)
-                }
+                // 不显示更新对话框，避免干扰用户操作
             }
         }
     }
@@ -372,6 +370,16 @@ class MainActivity : AppCompatActivity() {
     private var lastHdmiSwitchTime = 0L
     private val HDMI_SWITCH_COOLDOWN = 30000L // 30秒内不重复检查HDMI保活
 
+    // 不需要保活干预的应用列表（如浏览器、设置等）
+    private val EXCLUDED_PACKAGES = listOf(
+        "com.android.chrome",
+        "com.android.browser",
+        "com.emotn.browser",
+        "com.ucbrowser.tv",
+        "com.xiaomi.mitv.settings",
+        "com.android.settings"
+    )
+
     private fun startKeepAliveService(policy: LaunchPolicy) {
         // 停止之前的保活检查
         keepAliveHandler?.removeCallbacks(keepAliveRunnable!!)
@@ -384,6 +392,14 @@ class MainActivity : AppCompatActivity() {
         keepAliveRunnable = object : Runnable {
             override fun run() {
                 try {
+                    // 检查当前焦点应用，如果是浏览器/设置等，不干预
+                    val currentPackage = getCurrentFocusPackage()
+                    if (currentPackage != null && EXCLUDED_PACKAGES.any { currentPackage.contains(it) }) {
+                        android.util.Log.d("MainActivity", "当前在排除应用中($currentPackage)，跳过保活检查")
+                        keepAliveHandler?.postDelayed(this, 30000)
+                        return
+                    }
+
                     when (policy.mode) {
                         "app" -> {
                             // APP模式：检查目标APP是否在运行
