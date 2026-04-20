@@ -55,6 +55,7 @@ class DeviceOut(BaseModel):
     storage_usage: Optional[str] # New field
     online: bool
     policy_id: Optional[int]
+    policy_paused: bool = False  # 策略暂停状态
     class Config:
         from_attributes = True
 

@@ -74,6 +74,7 @@
                         <th>网络详情</th>
                         <th>在线状态</th>
                         <th>执行策略</th>
+                        <th>策略控制</th>
                         <th>操作</th>
                     </tr>
                 </thead>
@@ -324,6 +325,18 @@
                             ${policies.map(p => `<option value="${p.id}" ${d.policy_id === p.id ? 'selected' : ''}>${p.name}</option>`).join('')}
                         </select>
                         <button class="btn btn-info" style="padding: 6px 10px; margin-top: 5px;" onclick="bindPolicy(${d.id})">更新策略</button>
+                    </td>
+                    <td>
+                        <div style="display: flex; flex-direction: column; align-items: center; gap: 5px;">
+                            <span id="policy-status-${d.id}" style="font-size: 0.8rem; padding: 2px 8px; border-radius: 4px; ${d.policy_paused ? 'background: #fff3cd; color: #856404;' : 'background: #d4edda; color: #155724;'}">
+                                ${d.policy_paused ? '⏸ 已暂停' : '▶ 运行中'}
+                            </span>
+                            <button id="pause-resume-btn-${d.id}" class="btn ${d.policy_paused ? 'btn-success' : 'btn-warning'}"
+                                style="padding: 6px 10px; font-size: 0.8rem;"
+                                onclick="togglePolicyPause(${d.id}, ${d.policy_paused})">
+                                ${d.policy_paused ? '▶ 继续' : '⏸ 暂停'}
+                            </button>
+                        </div>
                     </td>
                     <td>
                         <div style="display: flex; flex-wrap: wrap; gap: 5px;">
@@ -689,6 +702,42 @@
             await fetch(`/api/v1/devices/${deviceId}/bind-policy/${policyId}`, { method: 'POST' });
             alert('策略已下发');
             loadData();
+        }
+
+        async function togglePolicyPause(deviceId, isPaused) {
+            const endpoint = isPaused ? 'resume-policy' : 'pause-policy';
+            const action = isPaused ? '继续' : '暂停';
+
+            try {
+                const resp = await fetch(`/api/v1/devices/${deviceId}/${endpoint}`, { method: 'POST' });
+                const result = await resp.json();
+
+                if (result.ok) {
+                    const statusSpan = document.getElementById(`policy-status-${deviceId}`);
+                    const btn = document.getElementById(`pause-resume-btn-${deviceId}`);
+
+                    if (isPaused) {
+                        statusSpan.textContent = '▶ 运行中';
+                        statusSpan.style.background = '#d4edda';
+                        statusSpan.style.color = '#155724';
+                        btn.textContent = '⏸ 暂停';
+                        btn.className = 'btn btn-warning';
+                        btn.setAttribute('onclick', `togglePolicyPause(${deviceId}, false)`);
+                    } else {
+                        statusSpan.textContent = '⏸ 已暂停';
+                        statusSpan.style.background = '#fff3cd';
+                        statusSpan.style.color = '#856404';
+                        btn.textContent = '▶ 继续';
+                        btn.className = 'btn btn-success';
+                        btn.setAttribute('onclick', `togglePolicyPause(${deviceId}, true)`);
+                    }
+                    alert(`策略已${action}`);
+                } else {
+                    alert(`操作失败: ${result.detail}`);
+                }
+            } catch (e) {
+                alert('网络错误');
+            }
         }
 
         async function confirmAdbInstall(deviceId, deviceName) {

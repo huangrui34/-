@@ -126,8 +126,31 @@ def device_heartbeat(
             "target_hdmi_port": policy.target_hdmi_port if policy else None,
             "fallback_mode": policy.fallback_mode if policy else None,
             "fallback_value": policy.fallback_value if policy else None,
-        }
+        },
+        "policy_paused": device.policy_paused
     }
+
+@app.post("/api/v1/devices/{device_id}/pause-policy")
+def pause_policy(device_id: int, db: Session = Depends(get_db)):
+    """暂停设备的策略执行"""
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    device.policy_paused = True
+    db.commit()
+    log_operation(db, "pause_policy", f"设备 {device.device_name} 的策略已暂停", device_id, device.device_name)
+    return {"ok": True, "policy_paused": True}
+
+@app.post("/api/v1/devices/{device_id}/resume-policy")
+def resume_policy(device_id: int, db: Session = Depends(get_db)):
+    """恢复设备的策略执行"""
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    device.policy_paused = False
+    db.commit()
+    log_operation(db, "resume_policy", f"设备 {device.device_name} 的策略已恢复", device_id, device.device_name)
+    return {"ok": True, "policy_paused": False}
 
 @app.get("/api/v1/devices", response_model=list[DeviceOut])
 def list_devices(db: Session = Depends(get_db)):
