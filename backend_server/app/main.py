@@ -130,6 +130,31 @@ def device_heartbeat(
         "policy_paused": device.policy_paused
     }
 
+def push_policy_update_to_device(device: Device, db: Session, action_type: str = "policy_update"):
+    """通过ADB推送策略更新到设备（包括暂停/恢复状态）"""
+    try:
+        ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
+        if ip and ip != "0.0.0.0":
+            adb_path = resolve_adb_path()
+            # 连接ADB
+            subprocess.run([adb_path, "connect", f"{ip}:5555"], timeout=5, capture_output=True)
+            # 启动APP
+            subprocess.run([
+                adb_path, "-s", f"{ip}:5555", "shell",
+                "am start -n com.company.tvlauncher/.MainActivity"
+            ], timeout=5, capture_output=True)
+            # 发送广播通知策略更新
+            subprocess.run([
+                adb_path, "-s", f"{ip}:5555", "shell",
+                "am broadcast -a com.company.tvlauncher.POLICY_UPDATED"
+            ], timeout=5, capture_output=True)
+            log_operation(db, f"push_{action_type}", f"已推送{action_type}到 {device.device_name}", device.id, device.device_name)
+            return True
+    except Exception as e:
+        log_operation(db, f"push_{action_type}_failed", f"推送失败: {str(e)}", device.id, device.device_name)
+        return False
+    return False
+
 @app.post("/api/v1/devices/{device_id}/pause-policy")
 def pause_policy(device_id: int, db: Session = Depends(get_db)):
     """暂停设备的策略执行"""
@@ -139,6 +164,8 @@ def pause_policy(device_id: int, db: Session = Depends(get_db)):
     device.policy_paused = True
     db.commit()
     log_operation(db, "pause_policy", f"设备 {device.device_name} 的策略已暂停", device_id, device.device_name)
+    # 实时推送到设备
+    push_policy_update_to_device(device, db, "pause_policy")
     return {"ok": True, "policy_paused": True}
 
 @app.post("/api/v1/devices/{device_id}/resume-policy")
@@ -150,6 +177,8 @@ def resume_policy(device_id: int, db: Session = Depends(get_db)):
     device.policy_paused = False
     db.commit()
     log_operation(db, "resume_policy", f"设备 {device.device_name} 的策略已恢复", device_id, device.device_name)
+    # 实时推送到设备
+    push_policy_update_to_device(device, db, "resume_policy")
     return {"ok": True, "policy_paused": False}
 
 @app.get("/api/v1/devices", response_model=list[DeviceOut])
@@ -331,6 +360,28 @@ def bind_policy(device_id: int, policy_id: int, db: Session = Depends(get_db)):
     device.policy_id = policy.id
     db.commit()
     log_operation(db, "bind_policy", f"设备 {device.device_name} 绑定了策略 {policy.name}", device_id, device.device_name)
+
+    # 通过ADB推送策略更新到设备
+    try:
+        ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
+        if ip and ip != "0.0.0.0":
+            adb_path = resolve_adb_path()
+            # 连接ADB
+            subprocess.run([adb_path, "connect", f"{ip}:5555"], timeout=5, capture_output=True)
+            # 启动APP
+            subprocess.run([
+                adb_path, "-s", f"{ip}:5555", "shell",
+                "am start -n com.company.tvlauncher/.MainActivity"
+            ], timeout=5, capture_output=True)
+            # 发送广播
+            subprocess.run([
+                adb_path, "-s", f"{ip}:5555", "shell",
+                "am broadcast -a com.company.tvlauncher.POLICY_UPDATED"
+            ], timeout=5, capture_output=True)
+            log_operation(db, "policy_push", f"已推送策略更新到 {device.device_name}", device_id, device.device_name)
+    except Exception as e:
+        log_operation(db, "policy_push_failed", f"推送失败: {str(e)}", device_id, device.device_name)
+
     return {"ok": True}
 
 @app.post("/api/v1/devices/{device_id}/room")

@@ -2,193 +2,179 @@
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#0D1B2A">
+    android:background="#0A0E14">
 
-    <!-- 顶部标题栏 -->
-    <LinearLayout
-        android:id="@+id/headerLayout"
-        android:layout_width="match_parent"
+    <!-- 左上角：时间显示 -->
+    <TextView
+        android:id="@+id/timeText"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_alignParentLeft="true"
         android:layout_alignParentTop="true"
-        android:orientation="vertical"
-        android:padding="32dp">
+        android:layout_marginLeft="40dp"
+        android:layout_marginTop="24dp"
+        android:text="00:00"
+        android:textColor="#4A5568"
+        android:textSize="16sp"
+        android:fontFamily="sans-serif-light" />
+
+    <!-- 右上角：设置按钮 -->
+    <LinearLayout
+        android:id="@+id/openSettingsBtn"
+        android:layout_width="72dp"
+        android:layout_height="52dp"
+        android:layout_alignParentRight="true"
+        android:layout_alignParentTop="true"
+        android:layout_marginRight="40dp"
+        android:layout_marginTop="16dp"
+        android:background="@drawable/btn_settings_selector"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center"
+        android:orientation="vertical">
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="会议室电视控制台"
+            android:text="⚙"
+            android:textColor="#8892A6"
+            android:textSize="22sp" />
+    </LinearLayout>
+
+    <!-- 中间：启动投屏按钮 -->
+    <LinearLayout
+        android:id="@+id/executeBtn"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_centerInParent="true"
+        android:background="@drawable/btn_execute_selector"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingLeft="56dp"
+        android:paddingTop="36dp"
+        android:paddingRight="56dp"
+        android:paddingBottom="36dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="启动投屏"
             android:textColor="#FFFFFF"
             android:textSize="28sp"
-            android:textStyle="bold" />
+            android:textStyle="bold"
+            android:fontFamily="sans-serif-medium" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Smart TV Control Panel"
-            android:textColor="#5C7A99"
+            android:layout_marginTop="10dp"
+            android:text="点击立即执行策略"
+            android:textColor="#6B7A8F"
             android:textSize="14sp" />
     </LinearLayout>
 
-    <!-- 状态卡片 -->
+    <!-- 右下角：状态显示 -->
     <LinearLayout
-        android:id="@+id/statusCard"
-        android:layout_width="match_parent"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_below="@id/headerLayout"
-        android:layout_marginLeft="32dp"
-        android:layout_marginRight="32dp"
-        android:background="@drawable/card_background"
+        android:layout_alignParentRight="true"
+        android:layout_alignParentBottom="true"
+        android:layout_marginRight="40dp"
+        android:layout_marginBottom="36dp"
         android:orientation="vertical"
-        android:padding="24dp">
+        android:gravity="right">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="当前状态"
-            android:textColor="#5C7A99"
-            android:textSize="14sp" />
-
-        <TextView
-            android:id="@+id/statusText"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="正在加载..."
-            android:textColor="#FFFFFF"
-            android:textSize="18sp" />
-
-        <!-- 策略模式指示器 -->
+        <!-- 策略状态行 -->
         <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:orientation="horizontal">
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
 
             <TextView
                 android:id="@+id/modeIndicator"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:background="#2D4A5E"
-                android:paddingLeft="16dp"
-                android:paddingTop="8dp"
-                android:paddingRight="16dp"
-                android:paddingBottom="8dp"
+                android:background="#1A2332"
+                android:paddingLeft="14dp"
+                android:paddingTop="7dp"
+                android:paddingRight="14dp"
+                android:paddingBottom="7dp"
                 android:text="APP模式"
-                android:textColor="#00D4AA"
-                android:textSize="14sp"
-                android:textStyle="bold" />
+                android:textColor="#22C55E"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:fontFamily="sans-serif-medium" />
 
             <TextView
-                android:id="@+id/connectionIndicator"
+                android:id="@+id/policyStatusIndicator"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginLeft="12dp"
-                android:background="#2D4A5E"
-                android:paddingLeft="16dp"
-                android:paddingTop="8dp"
-                android:paddingRight="16dp"
-                android:paddingBottom="8dp"
-                android:text="已连接"
-                android:textColor="#4FC3F7"
-                android:textSize="14sp"
-                android:textStyle="bold" />
+                android:layout_marginLeft="8dp"
+                android:background="#1A2332"
+                android:paddingLeft="14dp"
+                android:paddingTop="7dp"
+                android:paddingRight="14dp"
+                android:paddingBottom="7dp"
+                android:text="运行中"
+                android:textColor="#22C55E"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:fontFamily="sans-serif-medium" />
         </LinearLayout>
+
+        <!-- 连接状态 -->
+        <TextView
+            android:id="@+id/connectionIndicator"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="● 已连接"
+            android:textColor="#3B82F6"
+            android:textSize="13sp"
+            android:fontFamily="sans-serif-medium" />
+
+        <!-- 版本号 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="v1.0.0"
+            android:textColor="#2D3748"
+            android:textSize="12sp"
+            android:fontFamily="sans-serif-light" />
     </LinearLayout>
 
-    <!-- 功能按钮区域 -->
+    <!-- 左下角：当前策略详情 -->
     <LinearLayout
-        android:layout_width="match_parent"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_below="@id/statusCard"
-        android:layout_marginLeft="32dp"
-        android:layout_marginTop="24dp"
-        android:layout_marginRight="32dp"
-        android:orientation="horizontal">
-
-        <!-- 执行策略按钮 -->
-        <LinearLayout
-            android:id="@+id/executeBtn"
-            android:layout_width="0dp"
-            android:layout_height="120dp"
-            android:layout_weight="1"
-            android:background="@drawable/btn_execute_selector"
-            android:clickable="true"
-            android:focusable="true"
-            android:gravity="center"
-            android:orientation="vertical">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="执行策略"
-                android:textColor="#FFFFFF"
-                android:textSize="20sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="立即切换到策略目标"
-                android:textColor="#A0C4D8"
-                android:textSize="12sp" />
-        </LinearLayout>
-
-        <!-- 设置按钮 -->
-        <LinearLayout
-            android:id="@+id/openSettingsBtn"
-            android:layout_width="0dp"
-            android:layout_height="120dp"
-            android:layout_marginLeft="16dp"
-            android:layout_weight="1"
-            android:background="@drawable/btn_settings_selector"
-            android:clickable="true"
-            android:focusable="true"
-            android:gravity="center"
-            android:orientation="vertical">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="系统设置"
-                android:textColor="#FFFFFF"
-                android:textSize="20sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="配置服务器与管理密码"
-                android:textColor="#8FBFAA"
-                android:textSize="12sp" />
-        </LinearLayout>
-    </LinearLayout>
-
-    <!-- 底部信息 -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_alignParentLeft="true"
         android:layout_alignParentBottom="true"
-        android:gravity="center"
-        android:orientation="vertical"
-        android:padding="24dp">
+        android:layout_marginLeft="40dp"
+        android:layout_marginBottom="36dp"
+        android:orientation="vertical">
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="按返回键返回上级 · 按菜单键打开设置"
-            android:textColor="#3D5A73"
-            android:textSize="12sp" />
+            android:text="当前策略"
+            android:textColor="#4A5568"
+            android:textSize="12sp"
+            android:fontFamily="sans-serif-light" />
 
         <TextView
+            android:id="@+id/statusText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="v1.0.0 · Mi TV Launcher"
-            android:textColor="#2D4050"
-            android:textSize="11sp" />
+            android:text="投屏软件"
+            android:textColor="#E2E8F0"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:fontFamily="sans-serif-medium" />
     </LinearLayout>
 
 </RelativeLayout>

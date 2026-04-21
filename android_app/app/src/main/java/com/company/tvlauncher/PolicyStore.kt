@@ -12,7 +12,7 @@ class PolicyStore(private val context: Context) {
     private val prefs = context.getSharedPreferences("tv_policy", Context.MODE_PRIVATE)
 
     fun getServerBaseUrl(): String =
-        prefs.getString("server_base_url", "http://10.181.153.84:8000") ?: "http://10.181.153.84:8000"
+        prefs.getString("server_base_url", "http://localhost:8000") ?: "http://localhost:8000"
 
     fun setServerBaseUrl(url: String) {
         prefs.edit().putString("server_base_url", url.trimEnd('/')).apply()
@@ -74,6 +74,13 @@ class PolicyStore(private val context: Context) {
     fun isEscapeModeActive(nowMs: Long = System.currentTimeMillis()): Boolean {
         val until = getEscapeUntilMs()
         return until > nowMs
+    }
+
+    // 策略暂停状态
+    fun isPolicyPaused(): Boolean = prefs.getBoolean("policy_paused", false)
+
+    fun setPolicyPaused(paused: Boolean) {
+        prefs.edit().putBoolean("policy_paused", paused).apply()
     }
 
     /**

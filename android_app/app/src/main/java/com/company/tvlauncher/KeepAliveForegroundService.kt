@@ -80,10 +80,15 @@ class KeepAliveForegroundService : Service() {
     private fun createNotification(): Notification {
         val policyStore = PolicyStore(this)
         val policy = policyStore.getPolicy()
-        val statusText = when (policy.mode) {
-            "app" -> "保活: ${policy.targetAppPackage}"
-            "hdmi" -> "保活: 小米电视播放器 (HDMI${policy.targetHdmiPort})"
-            else -> "策略保活服务运行中"
+        val isPaused = policyStore.isPolicyPaused()
+        val statusText = if (isPaused) {
+            "策略已暂停"
+        } else {
+            when (policy.mode) {
+                "app" -> "保活: ${policy.targetAppPackage}"
+                "hdmi" -> "保活: 小米电视播放器 (HDMI${policy.targetHdmiPort})"
+                else -> "策略保活服务运行中"
+            }
         }
 
         // 点击通知打开MainActivity
@@ -95,7 +100,7 @@ class KeepAliveForegroundService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("TV Launcher 策略保活")
+            .setContentTitle("TV Launcher ${if (isPaused) "(已暂停)" else "策略保活"}")
             .setContentText(statusText)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentIntent(pendingIntent)
@@ -120,6 +125,16 @@ class KeepAliveForegroundService : Service() {
         keepAliveRunnable = object : Runnable {
             override fun run() {
                 try {
+                    // 首先检查策略是否暂停
+                    if (policyStore.isPolicyPaused()) {
+                        android.util.Log.d(TAG, "策略已暂停，跳过保活检查")
+                        // 更新通知显示暂停状态
+                        updateNotification()
+                        // 继续定时检查，以便恢复后能立即生效
+                        handler.postDelayed(this, CHECK_INTERVAL_MS)
+                        return
+                    }
+
                     val policy = policyStore.getPolicy()
 
                     when (policy.mode) {
@@ -145,26 +160,10 @@ class KeepAliveForegroundService : Service() {
                             }
                         }
                         "hdmi" -> {
-                            // HDMI模式：确保小米电视播放器在运行
-                            if (!executor.isAppRunning(HDMI_PLAYER_PACKAGE)) {
-                                android.util.Log.d(TAG, "小米电视播放器未运行，重新启动")
-                                // 启动小米电视播放器
-                                executor.launchApp(HDMI_PLAYER_PACKAGE)
-                                lastLaunchedPackage = HDMI_PLAYER_PACKAGE
-                                consecutiveFailures++
-
-                                // 等待播放器启动后再执行HDMI切换
-                                handler.postDelayed({
-                                    if (executor.isAppRunning(HDMI_PLAYER_PACKAGE)) {
-                                        executor.execute(policy)
-                                    }
-                                }, 2000)
-
-                                // 更新通知
-                                updateNotification()
-                            } else {
-                                consecutiveFailures = 0
-                            }
+                            // HDMI模式：不需要保活检查
+                            // HDMI切换是一次性的，一旦切换成功就由系统接管
+                            // 我们只需要确保播放器启动过一次即可，不需要持续检查
+                            consecutiveFailures = 0
                         }
                     }
                 } catch (e: Exception) {

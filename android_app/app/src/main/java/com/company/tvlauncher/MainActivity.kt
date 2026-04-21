@@ -23,6 +23,7 @@ import androidx.work.WorkManager
 import org.json.JSONObject
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.CountDownLatch
 
 class MainActivity : AppCompatActivity() {
     private val ioExecutor = Executors.newSingleThreadExecutor()
@@ -34,14 +35,35 @@ class MainActivity : AppCompatActivity() {
     private var keepAliveHandler: Handler? = null
     private var keepAliveRunnable: Runnable? = null
 
+    // 时间更新Handler
+    private var timeUpdateHandler: Handler? = null
+    private var timeUpdateRunnable: Runnable? = null
+
     private val policyUpdateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == "com.company.tvlauncher.POLICY_UPDATED") {
-                // 策略已更新，立即执行新策略（后台推送的策略更新视为用户主动操作）
-                mainHandler.post {
-                    android.util.Log.d("MainActivity", "收到策略更新广播，执行策略")
+                android.util.Log.d("MainActivity", "===== 收到策略更新广播 =====")
+                // 先同步最新的策略状态（包括暂停状态），再执行
+                ioExecutor.execute {
                     val policyStore = PolicyStore(this@MainActivity)
-                    forceExecutePolicy(policyStore, force = true, userTriggered = true)
+                    val api = RemoteApi(this@MainActivity, policyStore)
+                    val net = NetworkInfoProvider(this@MainActivity).collect()
+
+                    // 立即执行心跳同步，获取最新策略和暂停状态
+                    val heartbeatSuccess = api.heartbeat(net)
+                    val isPaused = policyStore.isPolicyPaused()
+                    android.util.Log.d("MainActivity", "心跳同步完成: success=$heartbeatSuccess, isPaused=$isPaused")
+
+                    // 在主线程检查暂停状态并决定是否执行策略
+                    mainHandler.post {
+                        refreshStatus(policyStore)
+                        if (isPaused) {
+                            android.util.Log.d("MainActivity", "===== 策略已暂停，不执行 =====")
+                        } else {
+                            android.util.Log.d("MainActivity", "===== 策略未暂停，执行策略 =====")
+                            forceExecutePolicy(policyStore, force = true, userTriggered = true)
+                        }
+                    }
                 }
             }
         }
@@ -73,9 +95,35 @@ class MainActivity : AppCompatActivity() {
         // 启动前台服务，防止被系统清理
         val foregroundIntent = Intent(this, KeepAliveForegroundService::class.java)
         startService(foregroundIntent)
+
+        // 启动时间更新
+        startTimeUpdate()
+    }
+
+    private fun startTimeUpdate() {
+        timeUpdateHandler = Handler(Looper.getMainLooper())
+        timeUpdateRunnable = object : Runnable {
+            override fun run() {
+                val timeText = findViewById<TextView>(R.id.timeText)
+                val timeFormat = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                timeText.text = timeFormat.format(java.util.Date())
+                timeUpdateHandler?.postDelayed(this, 1000) // 每秒更新
+            }
+        }
+        timeUpdateHandler?.post(timeUpdateRunnable!!)
     }
 
     private fun forceExecutePolicy(policyStore: PolicyStore, force: Boolean = false, userTriggered: Boolean = false, forceRestart: Boolean = false) {
+        // 先检查策略是否暂停（从SharedPreferences重新读取）
+        val isPaused = policyStore.isPolicyPaused()
+        android.util.Log.d("MainActivity", "forceExecutePolicy: isPaused=$isPaused")
+
+        if (isPaused) {
+            android.util.Log.d("MainActivity", "===== 策略已暂停，跳过执行 =====")
+            refreshStatus(policyStore)
+            return
+        }
+
         val policy = policyStore.getPolicy()
 
         // 检查策略是否有效
@@ -153,7 +201,7 @@ class MainActivity : AppCompatActivity() {
 
         android.util.Log.d("MainActivity", "策略已执行: ${policy.mode}模式")
     }
-    
+
     private fun isPolicyValid(policy: LaunchPolicy): Boolean {
         // 检查策略是否有效
         // 1. 如果是app模式，目标包名不能为空且不能是默认值
@@ -161,22 +209,22 @@ class MainActivity : AppCompatActivity() {
         return when (policy.mode) {
             "app" -> {
                 val targetApp = policy.targetAppPackage
-                !targetApp.isNullOrBlank() && 
-                targetApp != "com.example.cast" && 
+                !targetApp.isNullOrBlank() &&
+                targetApp != "com.example.cast" &&
                 targetApp != "com.android.settings"
             }
             "hdmi" -> policy.targetHdmiPort > 0
             else -> false
         }
     }
-    
+
     private fun showNoPolicyDialog() {
         AlertDialog.Builder(this)
             .setTitle("策略配置")
             .setMessage("暂无有效策略，5秒后返回主页")
             .setCancelable(false)
             .show()
-        
+
         // 5秒后自动返回主页
         mainHandler.postDelayed({
             val intent = Intent(Intent.ACTION_MAIN)
@@ -201,7 +249,7 @@ class MainActivity : AppCompatActivity() {
             e.printStackTrace()
         }
     }
-    
+
     private fun cleanupBackgroundApps(keepPackages: List<String> = emptyList()) {
         try {
             val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
@@ -209,14 +257,14 @@ class MainActivity : AppCompatActivity() {
             if (tasks != null) {
                 for (task in tasks) {
                     val processName = task.processName
-                    
+
                     // 检查是否需要保留此进程
                     val shouldKeep = keepPackages.any { keepPackage ->
                         processName.contains(keepPackage)
                     }
-                    
+
                     // 只清理非系统应用、非本应用、且不在保留列表中的应用
-                    if (processName != packageName && 
+                    if (processName != packageName &&
                         !processName.startsWith("com.android.") &&
                         !processName.startsWith("android.") &&
                         !shouldKeep) {
@@ -231,7 +279,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showPasswordDialog(policyStore: PolicyStore) {
         val input = EditText(this).apply {
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER or 
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or
                         android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
             hint = "请输入4位管理密码"
         }
@@ -267,18 +315,10 @@ class MainActivity : AppCompatActivity() {
         val foregroundIntent = Intent(this, KeepAliveForegroundService::class.java)
         startService(foregroundIntent)
 
-        // When returning to MainActivity (e.g. via Back or Home),
-        // check if we need to re-execute policy
         val now = System.currentTimeMillis()
         val policy = policyStore.getPolicy()
 
-        if (!policyStore.isEscapeModeActive() && now - lastPolicyExecutionTime > EXECUTION_COOLDOWN) {
-            // APP模式：强制重启APP以刷新投屏码
-            // HDMI模式：正常执行（不需要重启）
-            val forceRestart = policy.mode == "app"
-            forceExecutePolicy(policyStore, forceRestart = forceRestart)
-        }
-
+        // 先同步最新状态，然后再决定是否执行策略
         ioExecutor.execute {
             val net = NetworkInfoProvider(this).collect()
             val api = RemoteApi(this, policyStore)
@@ -292,12 +332,22 @@ class MainActivity : AppCompatActivity() {
                 heartbeatSuccess = api.heartbeat(net)
             }
 
-            // OTA更新检查已禁用，避免弹出对话框干扰用户
-            // val updateInfo = api.checkUpdate()
-
+            // 同步完成后，在主线程更新状态并决定是否执行策略
             mainHandler.post {
                 refreshStatus(policyStore)
-                // 不显示更新对话框，避免干扰用户操作
+
+                // 检查是否需要执行策略
+                if (!policyStore.isEscapeModeActive() && now - lastPolicyExecutionTime > EXECUTION_COOLDOWN) {
+                    // 再次检查暂停状态（因为心跳同步后可能已更新）
+                    if (policyStore.isPolicyPaused()) {
+                        android.util.Log.d("MainActivity", "onResume: 策略已暂停，不执行")
+                    } else {
+                        // APP模式：强制重启APP以刷新投屏码
+                        // HDMI模式：正常执行（不需要重启）
+                        val forceRestart = policy.mode == "app"
+                        forceExecutePolicy(policyStore, forceRestart = forceRestart)
+                    }
+                }
             }
         }
     }
@@ -398,6 +448,14 @@ class MainActivity : AppCompatActivity() {
         keepAliveRunnable = object : Runnable {
             override fun run() {
                 try {
+                    // 首先检查暂停状态
+                    val policyStore = PolicyStore(this@MainActivity)
+                    if (policyStore.isPolicyPaused()) {
+                        android.util.Log.d("MainActivity", "保活检查: 策略已暂停，跳过")
+                        keepAliveHandler?.postDelayed(this, 5000)
+                        return
+                    }
+
                     // 检查当前焦点应用，如果是浏览器/设置等，不干预
                     val currentPackage = getCurrentFocusPackage()
                     if (currentPackage != null && EXCLUDED_PACKAGES.any { currentPackage.contains(it) }) {
@@ -469,6 +527,11 @@ class MainActivity : AppCompatActivity() {
         keepAliveHandler = null
         keepAliveRunnable = null
 
+        // 清理时间更新Handler
+        timeUpdateHandler?.removeCallbacks(timeUpdateRunnable!!)
+        timeUpdateHandler = null
+        timeUpdateRunnable = null
+
         // 注销广播接收器
         try {
             unregisterReceiver(policyUpdateReceiver)
@@ -480,15 +543,21 @@ class MainActivity : AppCompatActivity() {
     private fun refreshStatus(policyStore: PolicyStore) {
         val policy = policyStore.getPolicy()
         val token = policyStore.getDeviceToken()
+        val isPaused = policyStore.isPolicyPaused()
 
-        // 更新状态文本
-        val tokenHint = if (token != null) "设备已注册" else "设备未注册"
-        val policyDetail = when (policy.mode) {
-            "app" -> "目标应用: ${policy.targetAppPackage}"
-            "hdmi" -> "HDMI端口: ${policy.targetHdmiPort}"
-            else -> "未知模式"
+        // 更新时间显示
+        val timeText = findViewById<TextView>(R.id.timeText)
+        val timeFormat = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+        timeText.text = timeFormat.format(java.util.Date())
+
+        // 更新状态文本（当前策略名称）
+        val statusText = findViewById<TextView>(R.id.statusText)
+        val policyName = when (policy.mode) {
+            "app" -> policy.targetAppPackage?.split(".")?.lastOrNull() ?: "投屏软件"
+            "hdmi" -> "HDMI ${policy.targetHdmiPort}"
+            else -> "未设置"
         }
-        findViewById<TextView>(R.id.statusText).text = "$tokenHint\n$policyDetail"
+        statusText.text = policyName
 
         // 更新模式指示器
         val modeIndicator = findViewById<TextView>(R.id.modeIndicator)
@@ -507,13 +576,26 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // 更新策略运行状态（显示暂停/运行中）
+        val policyStatusIndicator = findViewById<TextView>(R.id.policyStatusIndicator)
+        if (isPaused) {
+            policyStatusIndicator.text = "已暂停"
+            policyStatusIndicator.setTextColor(getColor(android.R.color.holo_orange_light))
+        } else if (isPolicyValid(policy)) {
+            policyStatusIndicator.text = "运行中"
+            policyStatusIndicator.setTextColor(getColor(android.R.color.holo_green_light))
+        } else {
+            policyStatusIndicator.text = "未配置"
+            policyStatusIndicator.setTextColor(getColor(android.R.color.darker_gray))
+        }
+
         // 更新连接指示器
         val connectionIndicator = findViewById<TextView>(R.id.connectionIndicator)
         if (token != null) {
-            connectionIndicator.text = "已连接"
+            connectionIndicator.text = "● 已连接"
             connectionIndicator.setTextColor(getColor(android.R.color.holo_blue_light))
         } else {
-            connectionIndicator.text = "未连接"
+            connectionIndicator.text = "○ 未连接"
             connectionIndicator.setTextColor(getColor(android.R.color.darker_gray))
         }
     }

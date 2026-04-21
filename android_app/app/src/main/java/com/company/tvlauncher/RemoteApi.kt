@@ -148,6 +148,11 @@ class RemoteApi(
                 hdmiPort = hdmi
             )
 
+            // 检查策略暂停状态
+            val policyPaused = json.optBoolean("policy_paused", false)
+            android.util.Log.d("RemoteApi", "心跳同步: policy_paused=$policyPaused")
+            policyStore.setPolicyPaused(policyPaused)
+
             // 只有策略真正变化时才发送广播，避免重复执行
             if (policyChanged && mode.isNotBlank()) {
                 android.util.Log.d("RemoteApi", "策略已变化，发送更新广播")
