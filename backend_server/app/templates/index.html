@@ -6,75 +6,1028 @@
     <title>Meeting TV Launcher 控制台</title>
     <style>
         :root {
-            --primary: #1a73e8;
-            --success: #1e7e34;
-            --danger: #d93025;
-            --warning: #f9ab00;
-            --info: #17a2b8;
-            --bg: #f8f9fa;
-            --card-bg: #ffffff;
-            --text: #3c4043;
-            --text-secondary: #70757a;
+            --blue: #2563eb;
+            --blue-light: #eff6ff;
+            --green: #16a34a;
+            --green-light: #f0fdf4;
+            --red: #dc2626;
+            --red-light: #fef2f2;
+            --orange: #ea580c;
+            --orange-light: #fff7ed;
+            --purple: #7c3aed;
+            --purple-light: #f5f3ff;
+            --indigo: #4f46e5;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-300: #d1d5db;
+            --gray-400: #9ca3af;
+            --gray-500: #6b7280;
+            --gray-600: #4b5563;
+            --gray-700: #374151;
+            --gray-800: #1f2937;
+            --gray-900: #111827;
+            --border: #e5e7eb;
+            --radius: 8px;
         }
-        body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; padding: 20px; background: var(--bg); color: var(--text); margin: 0; }
-        .container { max-width: 1400px; margin: 0 auto; }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
-        .card { background: var(--card-bg); padding: 24px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); margin-bottom: 24px; border: 1px solid #e0e0e0; }
-        h1, h2, h3 { margin-top: 0; color: var(--primary); }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { padding: 16px 12px; text-align: left; border-bottom: 1px solid #f1f3f4; }
-        th { background: #f8f9fa; color: var(--text-secondary); font-weight: 500; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px; }
-        .online { color: var(--success); font-weight: bold; }
-        .offline { color: var(--danger); }
-        .btn { padding: 8px 16px; background: var(--primary); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; transition: opacity 0.2s; white-space: nowrap; }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+            background: var(--gray-50);
+            color: var(--gray-800);
+            padding: 0;
+            line-height: 1.5;
+            font-size: 14px;
+        }
+
+        .container { max-width: 1440px; margin: 0 auto; }
+
+        /* ---- Header ---- */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 32px;
+            background: #fff;
+            border-bottom: 2px solid var(--gray-200);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header h1 {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--gray-900);
+            letter-spacing: normal;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .header-input-group {
+            display: flex;
+            border: 1px solid var(--gray-300);
+            border-radius: 6px;
+            overflow: hidden;
+            background: #fff;
+            align-items: center;
+        }
+
+        .header-input-group input {
+            border: none;
+            background: transparent;
+            font-size: 13px;
+            padding: 7px 12px;
+            outline: none;
+            color: var(--gray-800);
+            font-family: inherit;
+        }
+
+        .header-input-group input::placeholder { color: var(--gray-400); }
+
+        .header-input-group .input-divider {
+            width: 1px;
+            height: 20px;
+            background: var(--gray-200);
+            flex-shrink: 0;
+        }
+
+        /* ---- Buttons ---- */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 7px 16px;
+            background: var(--blue);
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            font-family: inherit;
+            transition: opacity 0.15s;
+            white-space: nowrap;
+            text-decoration: none;
+            line-height: 1.4;
+        }
+
         .btn:hover { opacity: 0.85; }
-        .btn-danger { background: var(--danger); }
-        .btn-success { background: var(--success); }
-        .btn-info { background: var(--info); }
-        .btn-outline { background: transparent; border: 1px solid var(--primary); color: var(--primary); }
-        .form-group { margin-bottom: 20px; }
-        label { display: block; margin-bottom: 8px; font-weight: 500; font-size: 0.9rem; }
-        input, select { padding: 10px; border: 1px solid #dadce0; border-radius: 6px; width: 100%; box-sizing: border-box; font-size: 1rem; }
-        input:focus { outline: none; border-color: var(--primary); }
-        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); }
-        .modal-content { background: white; margin: 5% auto; padding: 30px; border-radius: 12px; width: 500px; box-shadow: 0 24px 38px rgba(0,0,0,0.14); }
-        .app-list-tag { display: inline-block; background: #e8f0fe; color: #1967d2; padding: 4px 10px; border-radius: 16px; font-size: 0.75rem; margin: 2px; }
-        .net-info { font-size: 0.8rem; line-height: 1.5; color: var(--text-secondary); }
-        .net-label { font-weight: 600; color: #5f6368; width: 45px; display: inline-block; }
-        .progress-container { width: 100px; background-color: #e0e0e0; border-radius: 4px; height: 8px; margin-top: 4px; }
-        .progress-bar { height: 100%; border-radius: 4px; transition: width 0.3s; }
-        .usage-text { font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px; }
-        .room-tag { display: inline-block; background: #fef7e0; color: #b06000; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; margin-bottom: 4px; }
-        #screenshotImg { width: 100%; border-radius: 8px; border: 1px solid #dadce0; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-        .remote-controls { display: flex; flex-direction: column; gap: 15px; background: #f1f3f4; padding: 20px; border-radius: 12px; }
-        .dpad-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-        .control-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .btn:active { opacity: 0.7; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .btn-danger { background: var(--red); }
+        .btn-success { background: var(--green); }
+        .btn-info { background: var(--blue); }
+        .btn-warning { background: var(--orange); }
+
+        .btn-outline {
+            background: #fff;
+            border: 1px solid var(--gray-300);
+            color: var(--gray-700);
+        }
+        .btn-outline:hover { background: var(--gray-50); }
+
+        .btn-danger.btn-outline {
+            border-color: var(--red);
+            color: var(--red);
+            background: #fff;
+        }
+        .btn-danger.btn-outline:hover { background: var(--red-light); }
+
+        .btn-warning.btn-outline {
+            border-color: var(--orange);
+            color: var(--orange);
+            background: #fff;
+        }
+        .btn-warning.btn-outline:hover { background: var(--orange-light); }
+
+        .btn-info.btn-outline {
+            border-color: var(--blue);
+            color: var(--blue);
+            background: #fff;
+        }
+        .btn-info.btn-outline:hover { background: var(--blue-light); }
+
+        .btn-sm { padding: 5px 12px; font-size: 12px; }
+
+        /* ---- Cards / Sections ---- */
+        .card {
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            margin: 20px 32px;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 20px;
+            border-bottom: 1px solid var(--border);
+            background: var(--gray-50);
+            border-radius: var(--radius) var(--radius) 0 0;
+        }
+
+        .card-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--gray-800);
+            margin: 0;
+        }
+
+        /* ---- Search ---- */
+        .search-wrapper { position: relative; }
+
+        .search-wrapper input {
+            padding: 7px 12px 7px 32px;
+            border: 1px solid var(--gray-300);
+            border-radius: 6px;
+            background: #fff;
+            font-size: 13px;
+            font-family: inherit;
+            color: var(--gray-800);
+            width: 240px;
+            outline: none;
+        }
+
+        .search-wrapper input:focus { border-color: var(--blue); }
+
+        .search-wrapper input::placeholder { color: var(--gray-400); }
+
+        .search-icon {
+            position: absolute;
+            left: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 14px;
+            height: 14px;
+            border: 2px solid var(--gray-400);
+            border-radius: 50%;
+            pointer-events: none;
+        }
+
+        .search-icon::after {
+            content: '';
+            position: absolute;
+            width: 5px;
+            height: 2px;
+            background: var(--gray-400);
+            border-radius: 1px;
+            bottom: -2px;
+            right: -3px;
+            transform: rotate(45deg);
+        }
+
+        /* ---- Tables ---- */
+        table { width: 100%; border-collapse: collapse; }
+
+        th, td {
+            padding: 12px 14px;
+            text-align: left;
+        }
+
+        th {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--gray-500);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 2px solid var(--gray-200);
+            background: var(--gray-50);
+        }
+
+        td {
+            border-bottom: 1px solid var(--gray-100);
+            vertical-align: top;
+            font-size: 13px;
+        }
+
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: var(--blue-light); }
+
+        /* ---- Status Dots ---- */
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 5px;
+            flex-shrink: 0;
+        }
+
+        .status-dot-online { background: var(--green); }
+        .status-dot-offline { background: var(--gray-400); }
+        .status-dot-partial { background: var(--orange); }
+
+        .status-label {
+            display: inline-flex;
+            align-items: center;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .status-label.online { color: var(--green); }
+        .status-label.offline { color: var(--gray-400); }
+        .status-label.partial { color: var(--orange); }
+
+        .status-check { font-size: 12px; font-weight: 500; }
+        .status-check-pass { color: var(--green); }
+        .status-check-fail { color: var(--red); }
+        .status-reason { font-size: 11px; color: var(--red); margin-top: 2px; }
+        .status-net-type { font-size: 11px; color: var(--gray-500); margin-top: 2px; }
+
+        /* ---- Tags & Badges ---- */
+        .app-list-tag {
+            display: inline-block;
+            background: var(--blue-light);
+            color: var(--blue);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            margin: 1px;
+        }
+
+        .room-tag {
+            display: inline-block;
+            background: var(--orange-light);
+            color: var(--orange);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .policy-badge {
+            display: inline-flex;
+            align-items: center;
+            font-size: 12px;
+            padding: 3px 10px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        .policy-badge-running {
+            background: var(--green-light);
+            color: var(--green);
+        }
+
+        .policy-badge-paused {
+            background: var(--orange-light);
+            color: var(--orange);
+        }
+
+        /* ---- Progress Bars ---- */
+        .progress-container {
+            width: 100%;
+            background: var(--gray-200);
+            border-radius: 3px;
+            height: 5px;
+            margin-top: 3px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+
+        .usage-text {
+            font-size: 11px;
+            color: var(--gray-500);
+            margin-top: 4px;
+        }
+
+        /* ---- Network Info ---- */
+        .net-info {
+            font-size: 12px;
+            line-height: 1.7;
+            color: var(--gray-600);
+        }
+
+        .net-label {
+            font-weight: 600;
+            color: var(--gray-700);
+            width: 42px;
+            display: inline-block;
+            font-size: 12px;
+        }
+
+        .net-mac {
+            font-size: 10px;
+            color: var(--gray-400);
+            padding-left: 42px;
+        }
+
+        /* ---- Forms ---- */
+        .form-group { margin-bottom: 16px; }
+
+        label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--gray-700);
+        }
+
+        input, select {
+            padding: 8px 12px;
+            border: 1px solid var(--gray-300);
+            border-radius: 6px;
+            width: 100%;
+            box-sizing: border-box;
+            font-size: 14px;
+            font-family: inherit;
+            color: var(--gray-800);
+            background: #fff;
+            outline: none;
+        }
+
+        input:focus, select:focus {
+            border-color: var(--blue);
+            box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+        }
+
+        input::placeholder { color: var(--gray-400); }
+
+        /* ---- Modals ---- */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+        }
+
+        .modal-content {
+            background: #fff;
+            margin: 40px auto;
+            padding: 24px;
+            border-radius: var(--radius);
+            width: 500px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+        }
+
+        .modal-content h3 {
+            font-size: 17px;
+            font-weight: 600;
+            color: var(--gray-900);
+            margin-bottom: 20px;
+        }
+
+        .modal-footer {
+            text-align: right;
+            margin-top: 20px;
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+
+        /* ---- Remote Controls ---- */
+        .remote-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .section-card {
+            background: var(--gray-50);
+            padding: 16px;
+            border-radius: 6px;
+            border: 1px solid var(--gray-200);
+        }
+
+        .section-title {
+            margin: 0 0 12px 0;
+            color: var(--gray-800);
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .remote-btn-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+        }
+
+        /* ---- ADB Console ---- */
+        .adb-cmd-list {
+            max-height: 300px;
+            overflow-y: auto;
+            background: #fff;
+            border: 1px solid var(--gray-200);
+            border-radius: 6px;
+            padding: 4px;
+        }
+
+        .adb-cmd-item {
+            padding: 6px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-family: 'Consolas', 'Menlo', monospace;
+            transition: background 0.1s;
+            border-bottom: 1px solid var(--gray-100);
+        }
+
+        .adb-cmd-item:last-child { border-bottom: none; }
+        .adb-cmd-item:hover { background: var(--blue-light); }
+
+        .adb-cmd-item .cmd-name {
+            color: var(--gray-500);
+            font-size: 11px;
+            font-family: inherit;
+            display: block;
+            margin-bottom: 1px;
+            font-weight: 500;
+        }
+
+        .adb-output {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            font-family: 'Consolas', 'Menlo', monospace;
+            padding: 16px;
+            border-radius: 6px;
+            min-height: 120px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-size: 12px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        /* ---- Sort & Filter ---- */
+        th.sortable {
+            position: relative;
+            user-select: none;
+            padding-right: 36px;
+            cursor: pointer;
+        }
+
+        th.sortable:hover { color: var(--gray-800); }
+
+        th .sort-icon {
+            position: absolute;
+            right: 24px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 10px;
+            color: var(--gray-400);
+            line-height: 1;
+        }
+
+        th .sort-icon.asc, th .sort-icon.desc {
+            color: var(--blue);
+            font-weight: bold;
+        }
+
+        th .filter-icon {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            cursor: pointer;
+            font-size: 10px;
+            color: var(--gray-400);
+            padding: 2px;
+            border-radius: 3px;
+            transition: all 0.1s;
+        }
+
+        th .filter-icon:hover { color: var(--blue); background: var(--blue-light); }
+        th .filter-icon.active { color: var(--blue); }
+
+        .col-filter-popup {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            z-index: 100;
+            background: #fff;
+            border: 1px solid var(--gray-200);
+            border-radius: 6px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+            min-width: 200px;
+            max-height: 320px;
+            overflow: hidden;
+        }
+
+        .col-filter-popup.show { display: block; }
+
+        .col-filter-search {
+            padding: 8px;
+            border-bottom: 1px solid var(--gray-100);
+        }
+
+        .col-filter-search input {
+            width: 100%;
+            padding: 6px 8px;
+            border: 1px solid var(--gray-300);
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .col-filter-search input:focus {
+            border-color: var(--blue);
+            box-shadow: none;
+        }
+
+        .col-filter-list {
+            max-height: 200px;
+            overflow-y: auto;
+            padding: 4px 0;
+        }
+
+        .col-filter-item {
+            padding: 4px 12px;
+            font-size: 12px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .col-filter-item label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            font-weight: 400;
+            text-transform: none;
+            letter-spacing: normal;
+            margin-bottom: 0;
+            font-size: 12px;
+        }
+
+        .col-filter-item input[type="checkbox"] {
+            width: 14px;
+            height: 14px;
+            flex-shrink: 0;
+            accent-color: var(--blue);
+        }
+
+        .col-filter-actions {
+            padding: 8px;
+            border-top: 1px solid var(--gray-100);
+            display: flex;
+            gap: 6px;
+        }
+
+        .col-filter-actions button {
+            flex: 1;
+            padding: 6px 0;
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        .col-filter-actions .cf-ok { background: var(--blue); color: #fff; }
+        .col-filter-actions .cf-ok:hover { opacity: 0.85; }
+        .col-filter-actions .cf-cancel { background: var(--gray-100); color: var(--gray-700); }
+        .col-filter-actions .cf-cancel:hover { background: var(--gray-200); }
+
+        /* ---- Inline buttons in tables ---- */
+        .inline-btn {
+            padding: 1px 8px;
+            font-size: 11px;
+            border-radius: 4px;
+            border: 1px solid var(--blue);
+            color: var(--blue);
+            background: #fff;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: 500;
+        }
+        .inline-btn:hover { background: var(--blue-light); }
+
+        /* ---- Action buttons in device row ---- */
+        .action-btn-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        /* ---- Select in table ---- */
+        .table-select {
+            min-width: 80px;
+            max-width: 100%;
+            font-size: 13px;
+            padding: 6px 8px;
+            border-radius: 4px;
+            border: 1px solid var(--gray-300);
+            font-family: inherit;
+            background: #fff;
+            color: var(--gray-800);
+            outline: none;
+        }
+
+        .table-select:focus { border-color: var(--blue); }
+
+        /* ---- Policy control area ---- */
+        .policy-control {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* ---- Schedule bar ---- */
+        .schedule-bar {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            font-size: 12px;
+            color: var(--gray-600);
+            margin-bottom: 12px;
+            padding: 10px 14px;
+            background: var(--gray-50);
+            border: 1px solid var(--gray-200);
+            border-radius: 6px;
+        }
+
+        .schedule-bar input[type="number"] {
+            width: 50px;
+            padding: 4px 6px;
+            font-size: 12px;
+            text-align: center;
+            border-radius: 4px;
+            border: 1px solid var(--gray-300);
+        }
+
+        /* ---- ADB console layout ---- */
+        .adb-console-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .adb-console-header h3 { margin: 0; }
+
+        .adb-input-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .adb-input-row select,
+        .adb-input-row input[type="text"] {
+            border: 1px solid var(--gray-300);
+            border-radius: 4px;
+            padding: 8px 10px;
+            font-size: 13px;
+            font-family: 'Consolas', 'Menlo', monospace;
+        }
+
+        .adb-input-row select { width: 220px; font-family: inherit; }
+        .adb-input-row input[type="text"] { flex: 1; }
+
+        .adb-body { display: flex; gap: 14px; }
+
+        .adb-sidebar { flex: 0 0 210px; }
+
+        .adb-sidebar-label {
+            font-size: 11px;
+            color: var(--gray-500);
+            font-weight: 600;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .adb-output-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .adb-output-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .adb-output-label {
+            font-size: 11px;
+            color: var(--gray-500);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* ---- App list in modal ---- */
+        .app-sort-bar {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 8px;
+            padding: 0 2px;
+            align-items: center;
+        }
+
+        .app-sort-label {
+            font-size: 12px;
+            color: var(--gray-500);
+            line-height: 26px;
+        }
+
+        .app-count {
+            font-size: 11px;
+            color: var(--gray-400);
+            margin-left: auto;
+        }
+
+        .app-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            border-bottom: 1px solid var(--gray-100);
+        }
+
+        .app-item:last-child { border-bottom: none; }
+
+        .app-item code {
+            font-size: 12px;
+            word-break: break-all;
+            font-family: 'Consolas', 'Menlo', monospace;
+        }
+
+        .app-tag {
+            font-size: 10px;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-weight: 600;
+        }
+
+        .app-tag-system { color: var(--orange); background: var(--orange-light); }
+        .app-tag-disabled { color: var(--red); background: var(--red-light); }
+
+        /* ---- Install area ---- */
+        .install-section {
+            border-top: 1px solid var(--gray-200);
+            padding-top: 16px;
+            margin-top: 16px;
+        }
+
+        .install-section h4 {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: var(--gray-800);
+        }
+
+        .upload-row { display: flex; gap: 10px; align-items: center; }
+        .upload-row input[type="file"] { flex: 1; }
+
+        .silent-upgrade-row { display: flex; gap: 10px; align-items: center; }
+
+        .silent-upgrade-hint {
+            font-size: 11px;
+            color: var(--gray-400);
+        }
+
+        /* ---- Log list ---- */
+        .log-entry {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--gray-100);
+        }
+
+        .log-entry:last-child { border-bottom: none; }
+
+        .log-entry-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+
+        .log-action { color: var(--blue); font-weight: 600; font-size: 13px; }
+        .log-time { color: var(--gray-400); font-size: 12px; }
+        .log-detail { font-size: 13px; color: var(--gray-700); }
+        .log-device { color: var(--gray-400); font-size: 11px; margin-top: 2px; }
+
+        /* ---- Empty state ---- */
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: var(--gray-400);
+            font-size: 14px;
+        }
+
+        /* ---- Device name row ---- */
+        .device-name {
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 14px;
+            color: var(--gray-800);
+        }
+
+        .device-sn {
+            color: var(--gray-400);
+            font-size: 11px;
+            margin-top: 2px;
+        }
+
+        .device-model {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--gray-700);
+        }
+
+        .device-android-ver {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--purple);
+        }
+
+        /* ---- Scrollbar ---- */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--gray-400); }
+
+        /* ---- Responsive ---- */
+        @media (max-width: 1200px) {
+            body { padding: 0; }
+            .card { margin: 12px 16px; }
+            .header { flex-direction: column; align-items: flex-start; gap: 12px; padding: 12px 16px; }
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>Meeting TV Launcher 控制台</h1>
-            <div style="display: flex; gap: 10px;">
-                <div style="display: flex; background: white; padding: 5px; border-radius: 8px; border: 1px solid #dadce0; align-items: center;">
-                    <input type="text" id="deployIp" placeholder="输入电视 IP (如 192.168.1.10)" style="border:none; width: 220px; font-size: 0.85rem; padding: 5px 10px;">
-                    <button class="btn btn-success" style="padding: 5px 15px;" onclick="remoteDeploy()">一键部署上线</button>
+            <h1>Meeting TV Launcher</h1>
+            <div class="header-actions">
+                <!-- 一键部署 -->
+                <div class="header-input-group">
+                    <input type="text" id="deployIp" placeholder="电视 IP 地址">
+                    <button class="btn btn-success" style="border-radius: 0 6px 6px 0;" onclick="remoteDeploy()">一键部署上线</button>
                 </div>
-                <button class="btn btn-outline" onclick="showLogs()">📋 操作日志</button>
+                <!-- Scrcpy 快速连接 -->
+                <div class="header-input-group">
+                    <input type="text" id="scrcpyIpTop" placeholder="电视IP" style="width: 130px;">
+                    <div class="input-divider"></div>
+                    <input type="text" id="scrcpyPortTop" value="5555" style="width: 52px; text-align: center;">
+                    <button class="btn" style="border-radius: 0 6px 6px 0; background: var(--indigo);" onclick="scrcpyConnectByIpTop()">Scrcpy 连接</button>
+                </div>
+                <!-- ADB控制台 -->
+                <button class="btn" style="background: var(--gray-600);" onclick="openAdbConsole()">ADB 控制台</button>
+                <!-- 操作日志 -->
+                <button class="btn btn-outline" onclick="showLogs()">操作日志</button>
             </div>
         </div>
-        
+
         <div class="card">
-            <h2>设备管理 (会议室视角)</h2>
+            <div class="card-header">
+                <h2 class="card-title">设备管理</h2>
+                <div class="search-wrapper">
+                    <div class="search-icon"></div>
+                    <input type="text" id="deviceSearch" placeholder="搜索全部信息..." oninput="applyFilters()">
+                </div>
+            </div>
             <table id="deviceTable">
                 <thead>
                     <tr>
-                        <th>会议室 / 设备</th>
-                        <th>型号 / 资源状态</th>
-                        <th>网络详情</th>
-                        <th>在线状态</th>
-                        <th>执行策略</th>
-                        <th>策略控制</th>
+                        <th class="sortable" data-col="room" onclick="toggleSort('room')">
+                            会议室 / 设备
+                            <span class="sort-icon" id="sort-room">⇅</span>
+                            <span class="filter-icon" onclick="event.stopPropagation(); toggleFilterPopup('room')">▼</span>
+                            <div class="col-filter-popup" id="filter-popup-room">
+                                <div class="col-filter-search"><input type="text" placeholder="搜索..." oninput="filterPopupSearch(this, 'room')"></div>
+                                <div class="col-filter-list" id="filter-list-room"></div>
+                                <div class="col-filter-actions">
+                                    <button class="cf-ok" onclick="applyFilterPopup('room')">确定</button>
+                                    <button class="cf-cancel" onclick="closeFilterPopup('room')">取消</button>
+                                </div>
+                            </div>
+                        </th>
+                        <th class="sortable" data-col="model" onclick="toggleSort('model')">
+                            型号 / 资源状态
+                            <span class="sort-icon" id="sort-model">⇅</span>
+                            <span class="filter-icon" onclick="event.stopPropagation(); toggleFilterPopup('model')">▼</span>
+                            <div class="col-filter-popup" id="filter-popup-model">
+                                <div class="col-filter-search"><input type="text" placeholder="搜索..." oninput="filterPopupSearch(this, 'model')"></div>
+                                <div class="col-filter-list" id="filter-list-model"></div>
+                                <div class="col-filter-actions">
+                                    <button class="cf-ok" onclick="applyFilterPopup('model')">确定</button>
+                                    <button class="cf-cancel" onclick="closeFilterPopup('model')">取消</button>
+                                </div>
+                            </div>
+                        </th>
+                        <th class="sortable" data-col="network" onclick="toggleSort('network')">
+                            网络详情
+                            <span class="sort-icon" id="sort-network">⇅</span>
+                            <span class="filter-icon" onclick="event.stopPropagation(); toggleFilterPopup('network')">▼</span>
+                            <div class="col-filter-popup" id="filter-popup-network">
+                                <div class="col-filter-search"><input type="text" placeholder="搜索..." oninput="filterPopupSearch(this, 'network')"></div>
+                                <div class="col-filter-list" id="filter-list-network"></div>
+                                <div class="col-filter-actions">
+                                    <button class="cf-ok" onclick="applyFilterPopup('network')">确定</button>
+                                    <button class="cf-cancel" onclick="closeFilterPopup('network')">取消</button>
+                                </div>
+                            </div>
+                        </th>
+                        <th class="sortable" data-col="online" onclick="toggleSort('online')">
+                            在线状态
+                            <span class="sort-icon" id="sort-online">⇅</span>
+                            <span class="filter-icon" onclick="event.stopPropagation(); toggleFilterPopup('online')">▼</span>
+                            <div class="col-filter-popup" id="filter-popup-online">
+                                <div class="col-filter-search"><input type="text" placeholder="搜索..." oninput="filterPopupSearch(this, 'online')"></div>
+                                <div class="col-filter-list" id="filter-list-online"></div>
+                                <div class="col-filter-actions">
+                                    <button class="cf-ok" onclick="applyFilterPopup('online')">确定</button>
+                                    <button class="cf-cancel" onclick="closeFilterPopup('online')">取消</button>
+                                </div>
+                            </div>
+                        </th>
+                        <th class="sortable" data-col="policy" onclick="toggleSort('policy')">
+                            执行策略
+                            <span class="sort-icon" id="sort-policy">⇅</span>
+                            <span class="filter-icon" onclick="event.stopPropagation(); toggleFilterPopup('policy')">▼</span>
+                            <div class="col-filter-popup" id="filter-popup-policy">
+                                <div class="col-filter-search"><input type="text" placeholder="搜索..." oninput="filterPopupSearch(this, 'policy')"></div>
+                                <div class="col-filter-list" id="filter-list-policy"></div>
+                                <div class="col-filter-actions">
+                                    <button class="cf-ok" onclick="applyFilterPopup('policy')">确定</button>
+                                    <button class="cf-cancel" onclick="closeFilterPopup('policy')">取消</button>
+                                </div>
+                            </div>
+                        </th>
+                        <th class="sortable" data-col="paused" onclick="toggleSort('paused')">
+                            策略控制
+                            <span class="sort-icon" id="sort-paused">⇅</span>
+                            <span class="filter-icon" onclick="event.stopPropagation(); toggleFilterPopup('paused')">▼</span>
+                            <div class="col-filter-popup" id="filter-popup-paused">
+                                <div class="col-filter-search"><input type="text" placeholder="搜索..." oninput="filterPopupSearch(this, 'paused')"></div>
+                                <div class="col-filter-list" id="filter-list-paused"></div>
+                                <div class="col-filter-actions">
+                                    <button class="cf-ok" onclick="applyFilterPopup('paused')">确定</button>
+                                    <button class="cf-cancel" onclick="closeFilterPopup('paused')">取消</button>
+                                </div>
+                            </div>
+                        </th>
                         <th>操作</th>
                     </tr>
                 </thead>
@@ -83,9 +1036,9 @@
         </div>
 
         <div class="card">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                <h2>策略库</h2>
-                <button class="btn" onclick="showAddPolicy()">+ 新增策略</button>
+            <div class="card-header">
+                <h2 class="card-title">策略库</h2>
+                <button class="btn" onclick="showAddPolicy()">新增策略</button>
             </div>
             <table id="policyTable">
                 <thead>
@@ -101,8 +1054,8 @@
         </div>
     </div>
 
-    <!-- Modals (Add/Edit Policy, Screenshot, App Manager, Logs, Edit Room) -->
-    
+    <!-- Modals -->
+
     <!-- Edit Room Modal -->
     <div id="roomModal" class="modal">
         <div class="modal-content">
@@ -111,7 +1064,7 @@
                 <label>会议室/位置名称</label>
                 <input type="text" id="rName" placeholder="例如：1号会议室 / 经理办公室">
             </div>
-            <div style="text-align: right; margin-top:20px;">
+            <div class="modal-footer">
                 <button class="btn btn-outline" onclick="closeRoomModal()">取消</button>
                 <button class="btn" onclick="saveRoom()">保存</button>
             </div>
@@ -138,14 +1091,14 @@
                 <select id="pAppSelect" onchange="syncAppInput()">
                     <option value="">-- 请选择或在下方手动输入 --</option>
                 </select>
-                <label style="margin-top:10px">手动输入包名</label>
+                <label style="margin-top:12px">手动输入包名</label>
                 <input type="text" id="pPackage" placeholder="com.example.app">
             </div>
             <div id="hdmiInput" class="form-group" style="display:none">
                 <label>HDMI 端口</label>
                 <input type="number" id="pHdmi" value="1">
             </div>
-            <div style="text-align: right; margin-top:20px;">
+            <div class="modal-footer">
                 <button class="btn btn-outline" onclick="closeModal()">取消</button>
                 <button class="btn" onclick="savePolicy()">保存</button>
             </div>
@@ -154,49 +1107,74 @@
 
     <!-- Screenshot & Remote Modal -->
     <div id="screenshotModal" class="modal">
-        <div class="modal-content" style="width: 1000px; max-width: 95vw;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h3 id="screenshotTitle" style="margin:0">远程控制</h3>
-                <button class="btn btn-info" id="refreshScreenshotBtn">🔄 刷新画面</button>
+        <div class="modal-content" style="width: 600px; max-width: 95vw;">
+            <div class="adb-console-header">
+                <h3 id="screenshotTitle">远程控制</h3>
+                <button class="btn btn-outline btn-sm" onclick="closeScreenshotModal()">关闭</button>
             </div>
-            
-            <div style="display: flex; gap: 25px;">
-                <!-- Left: Screen -->
-                <div style="flex: 2; position: relative;">
-                    <div id="screenshotLoading" style="text-align: center; padding: 150px; background: #f8f9fa; border-radius: 8px; border: 2px dashed #dadce0;">正在获取电视画面...</div>
-                    <img id="screenshotImg" style="display:none; cursor: crosshair;" onclick="handleScreenClick(event)">
-                </div>
-                
-                <!-- Right: Controls -->
-                <div style="flex: 1;" class="remote-controls">
-                    <div class="dpad-grid">
-                        <div></div>
-                        <button class="btn btn-outline" onclick="sendKey('UP')">▲</button>
-                        <div></div>
-                        <button class="btn btn-outline" onclick="sendKey('LEFT')">◀</button>
-                        <button class="btn btn-success" onclick="sendKey('OK')">OK</button>
-                        <button class="btn btn-outline" onclick="sendKey('RIGHT')">▶</button>
-                        <div></div>
-                        <button class="btn btn-outline" onclick="sendKey('DOWN')">▼</button>
-                        <div></div>
-                    </div>
-                    
-                    <div class="control-grid">
-                        <button class="btn btn-info" onclick="sendKey('BACK')">返回</button>
-                        <button class="btn btn-info" onclick="sendKey('HOME')">主页</button>
-                        <button class="btn btn-info" onclick="sendKey('MENU')">菜单</button>
-                        <button class="btn btn-info" onclick="sendKey('VOLUP')">音量+</button>
-                        <button class="btn btn-info" onclick="sendKey('VOLDOWN')">音量-</button>
-                    </div>
-                    
-                    <div style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4; border-top: 1px solid #dadce0; pt: 10px;">
-                        💡 <b>提示:</b> 您可以直接点击左侧画面进行模拟屏幕点击操作。
-                    </div>
-                </div>
+            <div class="remote-controls" id="remoteControlsArea">
+                <!-- 动态生成控制面板 -->
             </div>
+        </div>
+    </div>
 
-            <div style="text-align: right; margin-top:25px;">
-                <button class="btn btn-outline" onclick="closeScreenshotModal()">退出远程</button>
+    <!-- ADB Console Modal -->
+    <div id="adbConsoleModal" class="modal">
+        <div class="modal-content" style="width: 880px; max-width: 95vw;">
+            <div class="adb-console-header">
+                <h3>ADB 命令控制台</h3>
+                <button class="btn btn-outline btn-sm" onclick="closeAdbConsole()">关闭</button>
+            </div>
+            <!-- 设备选择 + IP直连 + 命令输入 -->
+            <div class="adb-input-row">
+                <select id="adbConsoleDevice">
+                    <option value="">-- 选择设备 --</option>
+                </select>
+                <span style="color:var(--gray-400); font-size:13px;">或</span>
+                <input type="text" id="adbConsoleIpInput" placeholder="直接输入 IP">
+                <input type="text" id="adbConsoleCmdInput" placeholder="输入 ADB 命令" style="flex:1;">
+                <button class="btn" onclick="executeAdbConsoleCmd()" id="adbConsoleExecBtn">执行</button>
+                <button class="btn btn-danger" onclick="stopAdbSchedule()" id="adbConsoleStopBtn" style="display:none;">停止</button>
+            </div>
+            <!-- 定时执行 -->
+            <div class="schedule-bar">
+                <span>定时:</span>
+                <input type="number" id="adbScheduleInterval" value="5" min="1">
+                <span>秒/次</span>
+                <input type="number" id="adbScheduleCount" value="0" min="0">
+                <span>次 (0=无限)</span>
+                <button class="btn btn-sm" style="background: var(--gray-600);" onclick="startAdbSchedule()" id="adbStartScheduleBtn">开始定时</button>
+            </div>
+            <div id="adbScheduleStatus" style="font-size:13px; color:var(--blue); margin-bottom:10px; display:none;"></div>
+            <!-- 主体：常用命令 + 输出 -->
+            <div class="adb-body">
+                <div class="adb-sidebar">
+                    <div class="adb-sidebar-label">常用命令（双击填入）</div>
+                    <div class="adb-cmd-list" id="adbCmdList">
+                        <div class="adb-cmd-item" ondblclick="fillAdbConsoleCmd(this.dataset.cmd)" data-cmd="shell dumpsys battery"><span class="cmd-name">电池信息</span>shell dumpsys battery</div>
+                        <div class="adb-cmd-item" ondblclick="fillAdbConsoleCmd(this.dataset.cmd)" data-cmd="shell dumpsys wifi"><span class="cmd-name">WiFi信息</span>shell dumpsys wifi</div>
+                        <div class="adb-cmd-item" ondblclick="fillAdbConsoleCmd(this.dataset.cmd)" data-cmd="shell getprop ro.build.version.release"><span class="cmd-name">系统版本</span>shell getprop ro.build.version.release</div>
+                        <div class="adb-cmd-item" ondblclick="fillAdbConsoleCmd(this.dataset.cmd)" data-cmd="shell getprop ro.product.model"><span class="cmd-name">设备型号</span>shell getprop ro.product.model</div>
+                        <div class="adb-cmd-item" ondblclick="fillAdbConsoleCmd(this.dataset.cmd)" data-cmd="shell pm list packages -3"><span class="cmd-name">第三方应用</span>shell pm list packages -3</div>
+                        <div class="adb-cmd-item" ondblclick="fillAdbConsoleCmd(this.dataset.cmd)" data-cmd="shell pm clear "><span class="cmd-name">清除应用数据</span>shell pm clear &lt;包名&gt;</div>
+                        <div class="adb-cmd-item" ondblclick="fillAdbConsoleCmd(this.dataset.cmd)" data-cmd="shell am force-stop "><span class="cmd-name">强制停止应用</span>shell am force-stop &lt;包名&gt;</div>
+                        <div class="adb-cmd-item" ondblclick="fillAdbConsoleCmd(this.dataset.cmd)" data-cmd="shell am start -n "><span class="cmd-name">启动应用</span>shell am start -n &lt;包名/&gt;Activity</div>
+                        <div class="adb-cmd-item" ondblclick="fillAdbConsoleCmd(this.dataset.cmd)" data-cmd="shell input keyevent "><span class="cmd-name">模拟按键</span>shell input keyevent &lt;code&gt;</div>
+                        <div class="adb-cmd-item" ondblclick="fillAdbConsoleCmd(this.dataset.cmd)" data-cmd="shell input tap "><span class="cmd-name">模拟点击</span>shell input tap &lt;x y&gt;</div>
+                        <div class="adb-cmd-item" ondblclick="fillAdbConsoleCmd(this.dataset.cmd)" data-cmd="shell screencap -p /sdcard/screen.png"><span class="cmd-name">截屏到设备</span>shell screencap -p /sdcard/screen.png</div>
+                        <div class="adb-cmd-item" ondblclick="fillAdbConsoleCmd(this.dataset.cmd)" data-cmd="shell settings get global "><span class="cmd-name">读取系统设置</span>shell settings get global &lt;key&gt;</div>
+                        <div class="adb-cmd-item" ondblclick="fillAdbConsoleCmd(this.dataset.cmd)" data-cmd="shell settings put global "><span class="cmd-name">写入系统设置</span>shell settings put global &lt;key&gt; &lt;value&gt;</div>
+                        <div class="adb-cmd-item" ondblclick="fillAdbConsoleCmd(this.dataset.cmd)" data-cmd="shell reboot"><span class="cmd-name">重启设备</span>shell reboot</div>
+                        <div class="adb-cmd-item" ondblclick="fillAdbConsoleCmd(this.dataset.cmd)" data-cmd="logcat -d -t 50"><span class="cmd-name">最近日志</span>logcat -d -t 50</div>
+                    </div>
+                </div>
+                <div class="adb-output-area">
+                    <div class="adb-output-header">
+                        <span class="adb-output-label">输出结果</span>
+                        <button class="btn btn-sm" style="background: var(--gray-600);" onclick="document.getElementById('adbConsoleOutput').innerHTML=''">清空</button>
+                    </div>
+                    <div class="adb-output" id="adbConsoleOutput" style="flex:1; min-height:300px;">等待执行命令...</div>
+                </div>
             </div>
         </div>
     </div>
@@ -205,15 +1183,21 @@
     <div id="appModal" class="modal">
         <div class="modal-content" style="width: 650px;">
             <h3 id="appModalTitle">应用管理</h3>
-            <div id="appList" style="max-height: 350px; overflow-y: auto; border: 1px solid #f1f3f4; border-radius: 8px; margin: 15px 0; background: #f8f9fa;"></div>
-            <div style="border-top: 1px solid #eee; padding-top: 20px;">
-                <h4 style="margin: 0 0 15px 0;">安装新应用</h4>
-                <div style="display: flex; gap: 10px; align-items: center;">
+            <div id="appList" style="max-height: 350px; overflow-y: auto; border: 1px solid #e5e5ea; border-radius: 6px; margin: 20px 0; background: #fff;"></div>
+            <div class="install-section">
+                <h4>安装新应用</h4>
+                <div class="upload-row">
                     <input type="file" id="apkFileInput" accept=".apk" style="flex: 1;">
                     <button class="btn btn-success" onclick="uploadApk()">上传并安装</button>
                 </div>
             </div>
-            <div style="text-align: right; margin-top:25px;">
+            <div class="install-section">
+                <div class="silent-upgrade-row">
+                    <button class="btn" style="background: var(--orange);" onclick="silentUpgrade()">静默升级管理应用</button>
+                    <span class="silent-upgrade-hint">覆盖安装最新版APP，不影响电视当前操作，安装后自动重启</span>
+                </div>
+            </div>
+            <div class="modal-footer">
                 <button class="btn btn-outline" onclick="closeAppModal()">关闭</button>
             </div>
         </div>
@@ -222,29 +1206,40 @@
     <!-- Operation Log Modal -->
     <div id="logModal" class="modal">
         <div class="modal-content" style="width: 850px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h3 style="margin:0">操作日志</h3>
-                <div>
-                    <button class="btn btn-danger" style="margin-right: 10px;" onclick="clearLogs()">清空记录</button>
-                    <button class="btn btn-outline" onclick="closeLogModal()">关闭</button>
+            <div class="adb-console-header">
+                <h3>操作日志</h3>
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn btn-danger btn-sm" onclick="clearLogs()">清空记录</button>
+                    <button class="btn btn-outline btn-sm" onclick="closeLogModal()">关闭</button>
                 </div>
             </div>
-            <div id="logList" style="max-height: 450px; overflow-y: auto; border-radius: 8px; background: #f8f9fa;"></div>
+            <div id="logList" style="max-height: 450px; overflow-y: auto; border-radius: 6px; background: #fff; border: 1px solid #e5e5ea;"></div>
         </div>
     </div>
 
     <script>
         let allInstalledApps = new Set();
+        let allDevices = [];
+        let allPolicies = [];
+        let connectivityData = {}; // { deviceId: { ping: bool, adb: bool, reason: str } }
         let currentRemoteDeviceId = null;
         let currentAppDeviceId = null;
         let currentRoomDeviceId = null;
-        let screenWebSocket = null;
-        let screenStreamInterval = null;
         let scrcpyCheckInterval = null;
+        let adbScheduleInterval = null;
+        let adbScheduleCount = 0;
+
+        // ===== Column filter & sort state =====
+        let colSortState = {};   // { col: 'asc'|'desc'|null }
+        let colFilterState = {}; // { col: Set of selected values }  — null means no filter (all selected)
+        let colFilterTemp = {};  // temp state while popup is open
 
         async function loadData() {
             const policies = await (await fetch('/api/v1/policies')).json();
             const devices = await (await fetch('/api/v1/devices')).json();
+
+            allPolicies = policies;
+            allDevices = devices;
 
             allInstalledApps.clear();
             devices.forEach(d => {
@@ -274,12 +1269,218 @@
                     <td><strong>${p.name}</strong></td>
                     <td><span class="app-list-tag">${p.mode.toUpperCase()}</span></td>
                     <td>${p.mode === 'app' ? '<code>' + p.target_app_package + '</code>' : 'HDMI ' + p.target_hdmi_port}</td>
-                    <td><button class="btn btn-danger btn-outline" style="padding: 4px 10px;" onclick="deletePolicy(${p.id})">删除</button></td>
+                    <td><button class="btn btn-danger btn-outline btn-sm" onclick="deletePolicy(${p.id})">删除</button></td>
                 </tr>
             `).join('');
 
-            // Render Devices
-            document.getElementById('deviceBody').innerHTML = devices.map(d => {
+            // Render devices with current filter/sort
+            renderDevices();
+
+            // 同时触发连通性检测（不阻塞渲染）
+            checkConnectivity();
+        }
+
+        // ===== Column value extractors =====
+        function getColValue(d, col) {
+            switch(col) {
+                case 'room': return d.room_name || '未分配会议室';
+                case 'model': return d.model_name || '-';
+                case 'network': return [d.eth_ip, d.wifi_ip, d.network_type === 'ethernet' ? '有线' : (d.network_type === 'wifi' ? 'WiFi' : '')].filter(v => v && v !== '0.0.0.0').join(', ') || '无';
+                case 'online': {
+                    const conn = connectivityData[d.id];
+                    if (conn && conn.ping && conn.adb) return '在线';
+                    if (conn && conn.ping && !conn.adb) return '部分在线';
+                    if (conn && !conn.ping) return '离线';
+                    return d.online ? '在线' : '离线';
+                }
+                case 'policy': {
+                    if (!d.policy_id) return '未分配策略';
+                    const p = allPolicies.find(p => p.id === d.policy_id);
+                    return p ? p.name : '未知策略';
+                }
+                case 'paused': return d.policy_paused ? '已暂停' : '运行中';
+                default: return '';
+            }
+        }
+
+        // ===== Sort =====
+        function toggleSort(col) {
+            const cur = colSortState[col];
+            if (!cur) colSortState[col] = 'asc';
+            else if (cur === 'asc') colSortState[col] = 'desc';
+            else delete colSortState[col];
+            // Update sort icons
+            document.querySelectorAll('th .sort-icon').forEach(el => {
+                el.className = 'sort-icon';
+                el.textContent = '⇅';
+            });
+            for (const [c, dir] of Object.entries(colSortState)) {
+                const el = document.getElementById('sort-' + c);
+                if (el) { el.className = 'sort-icon ' + dir; el.textContent = dir === 'asc' ? '↑' : '↓'; }
+            }
+            renderDevices();
+        }
+
+        // ===== Filter popup =====
+        function toggleFilterPopup(col) {
+            const popup = document.getElementById('filter-popup-' + col);
+            const wasOpen = popup.classList.contains('show');
+            // Close all popups first
+            document.querySelectorAll('.col-filter-popup').forEach(p => p.classList.remove('show'));
+            if (wasOpen) return;
+
+            // Build filter options
+            const values = new Set();
+            allDevices.forEach(d => values.add(getColValue(d, col)));
+            const sorted = Array.from(values).sort();
+
+            // Initialize temp filter state (copy current)
+            if (!colFilterState[col]) colFilterState[col] = null; // null = all
+            colFilterTemp[col] = colFilterState[col] ? new Set(colFilterState[col]) : null;
+
+            const listEl = document.getElementById('filter-list-' + col);
+            const allChecked = !colFilterTemp[col];
+            listEl.innerHTML = `
+                <div class="col-filter-item">
+                    <label><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="toggleFilterAll('${col}', this.checked)"> <strong>（全选）</strong></label>
+                </div>
+            ` + sorted.map(v => `
+                <div class="col-filter-item" data-value="${v}">
+                    <label><input type="checkbox" ${allChecked || colFilterTemp[col].has(v) ? 'checked' : ''} onchange="toggleFilterItem('${col}', '${v.replace(/'/g, "\\'")}', this.checked)"> ${v}</label>
+                </div>
+            `).join('');
+
+            // Reset search
+            popup.querySelector('.col-filter-search input').value = '';
+            popup.classList.add('show');
+
+            // Update filter icon active state
+            updateFilterIcon(col);
+        }
+
+        function closeFilterPopup(col) {
+            document.getElementById('filter-popup-' + col).classList.remove('show');
+        }
+
+        function applyFilterPopup(col) {
+            colFilterState[col] = colFilterTemp[col] && colFilterTemp[col].size > 0 ? colFilterTemp[col] : null;
+            closeFilterPopup(col);
+            updateFilterIcon(col);
+            renderDevices();
+        }
+
+        function toggleFilterAll(col, checked) {
+            if (checked) {
+                colFilterTemp[col] = null;
+            } else {
+                colFilterTemp[col] = new Set();
+            }
+            // Update all checkboxes
+            const listEl = document.getElementById('filter-list-' + col);
+            listEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = checked);
+        }
+
+        function toggleFilterItem(col, value, checked) {
+            if (!colFilterTemp[col]) {
+                // Was "all selected", now deselecting one: start with all, remove one
+                const allValues = new Set();
+                allDevices.forEach(d => allValues.add(getColValue(d, col)));
+                colFilterTemp[col] = allValues;
+            }
+            if (checked) colFilterTemp[col].add(value);
+            else colFilterTemp[col].delete(value);
+            // Update "select all" checkbox
+            const listEl = document.getElementById('filter-list-' + col);
+            const allCb = listEl.querySelector('input[type="checkbox"]');
+            const totalItems = listEl.querySelectorAll('.col-filter-item[data-value] input').length;
+            const checkedItems = listEl.querySelectorAll('.col-filter-item[data-value] input:checked').length;
+            allCb.checked = checkedItems === totalItems;
+        }
+
+        function filterPopupSearch(input, col) {
+            const kw = input.value.toLowerCase();
+            const listEl = document.getElementById('filter-list-' + col);
+            listEl.querySelectorAll('.col-filter-item[data-value]').forEach(item => {
+                item.style.display = item.dataset.value.toLowerCase().includes(kw) ? '' : 'none';
+            });
+        }
+
+        function updateFilterIcon(col) {
+            const icon = document.querySelector(`th[data-col="${col}"] .filter-icon`);
+            if (!icon) return;
+            icon.classList.toggle('active', !!colFilterState[col]);
+        }
+
+        // Close filter popups on outside click
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.sortable')) {
+                document.querySelectorAll('.col-filter-popup').forEach(p => p.classList.remove('show'));
+            }
+        });
+
+        // ===== Apply all filters & sort =====
+        function applyFilters() {
+            renderDevices();
+        }
+
+        function searchMatch(device, keyword) {
+            if (!keyword) return true;
+            const kw = keyword.toLowerCase();
+            const fields = [
+                device.device_name, device.device_sn, device.room_name,
+                device.model_name, device.eth_ip, device.wifi_ip,
+                device.wifi_mac, device.eth_mac, device.network_ssid,
+                device.network_type, device.ram_usage, device.storage_usage,
+            ];
+            let appsStr = '';
+            if (device.installed_apps) {
+                try { appsStr = JSON.parse(device.installed_apps).join(' '); } catch(e) {}
+            }
+            let policyName = '';
+            if (device.policy_id && allPolicies.length) {
+                const p = allPolicies.find(p => p.id === device.policy_id);
+                if (p) policyName = p.name;
+            }
+            const allText = [...fields, appsStr, policyName].filter(Boolean).join(' ').toLowerCase();
+            return allText.includes(kw);
+        }
+
+        function renderDevices() {
+            const searchKw = document.getElementById('deviceSearch').value.trim();
+            let filtered = [...allDevices];
+
+            // Global search
+            if (searchKw) {
+                filtered = filtered.filter(d => searchMatch(d, searchKw));
+            }
+
+            // Column filters
+            for (const [col, selectedSet] of Object.entries(colFilterState)) {
+                if (!selectedSet) continue;
+                filtered = filtered.filter(d => selectedSet.has(getColValue(d, col)));
+            }
+
+            // Sort
+            const sortEntries = Object.entries(colSortState);
+            if (sortEntries.length > 0) {
+                filtered.sort((a, b) => {
+                    for (const [col, dir] of sortEntries) {
+                        const va = getColValue(a, col).toLowerCase();
+                        const vb = getColValue(b, col).toLowerCase();
+                        if (va < vb) return dir === 'asc' ? -1 : 1;
+                        if (va > vb) return dir === 'asc' ? 1 : -1;
+                    }
+                    return 0;
+                });
+            }
+
+            if (filtered.length === 0) {
+                document.getElementById('deviceBody').innerHTML = '<tr><td colspan="7" class="empty-state">无匹配设备</td></tr>';
+                return;
+            }
+
+            const policies = allPolicies;
+            document.getElementById('deviceBody').innerHTML = filtered.map(d => {
                 let appTags = '';
                 if (d.installed_apps) {
                     try {
@@ -290,20 +1491,20 @@
 
                 const ramData = parseUsage(d.ram_usage);
                 const storageData = parseUsage(d.storage_usage);
-                
+
                 return `
                 <tr>
                     <td>
                         <div class="room-tag">${d.room_name || '未分配会议室'}</div>
-                        <div style="font-weight:600; display: flex; align-items: center; gap: 5px;">
-                            ${d.device_name} 
-                            <button class="btn btn-outline" style="padding: 2px 6px; font-size: 0.7rem;" onclick="openRoomEdit(${d.id}, '${d.room_name || ''}')">✎</button>
+                        <div class="device-name">
+                            ${d.device_name}
+                            <button class="inline-btn" onclick="openRoomEdit(${d.id}, '${d.room_name || ''}')">编辑</button>
                         </div>
-                        <div style="color: #70757a; font-size: 0.75rem; margin-top: 4px;">SN: ${d.device_sn}</div>
+                        <div class="device-sn">SN: ${d.device_sn}</div>
                     </td>
                     <td>
-                        <div style="font-size: 0.85rem; font-weight: 500;">${d.model_name || '-'}</div>
-                        <div style="margin-top: 8px;">
+                        <div class="device-model">${d.model_name || '-'}${d.android_version ? ' <span class="device-android-ver">Android ' + d.android_version + '</span>' : ''}</div>
+                        <div style="margin-top: 10px;">
                             <div class="usage-text">RAM: ${d.ram_usage || 'N/A'}</div>
                             <div class="progress-container"><div class="progress-bar" style="width: ${ramData.percent}%; background: ${ramData.color}"></div></div>
                             <div class="usage-text">存储: ${d.storage_usage || 'N/A'}</div>
@@ -311,70 +1512,100 @@
                         </div>
                     </td>
                     <td class="net-info">
-                        <div><span class="net-label">有线:</span> ${d.eth_ip || '0.0.0.0'}</div>
-                        <div><span class="net-label">WiFi:</span> ${d.wifi_ip || '0.0.0.0'}</div>
-                        <div style="margin-top:4px; font-size: 0.7rem; color: #999;">${d.wifi_mac || ''}</div>
+                        <div><span class="net-label">有线:</span> ${d.eth_ip && d.eth_ip !== '0.0.0.0' ? d.eth_ip : '—'}</div>
+                        <div class="net-mac">${d.eth_mac ? 'MAC: ' + d.eth_mac : ''}</div>
+                        <div style="margin-top:4px;"><span class="net-label">WiFi:</span> ${d.wifi_ip && d.wifi_ip !== '0.0.0.0' ? d.wifi_ip : '—'}</div>
+                        <div class="net-mac">${d.wifi_mac ? 'MAC: ' + d.wifi_mac : ''}</div>
                     </td>
                     <td>
-                        <span class="${d.online ? 'online' : 'offline'}">${d.online ? '● 在线' : '○ 离线'}</span><br>
-                        <small style="color: #70757a;">${d.network_ssid || '未连接无线'}</small>
+                        ${renderOnlineStatus(d)}
                     </td>
                     <td>
-                        <select id="sel-${d.id}" style="width:140px; font-size: 0.85rem; padding: 6px;">
-                            <option value="">未分配策略</option>
-                            ${policies.map(p => `<option value="${p.id}" ${d.policy_id === p.id ? 'selected' : ''}>${p.name}</option>`).join('')}
-                        </select>
-                        <button class="btn btn-info" style="padding: 6px 10px; margin-top: 5px;" onclick="bindPolicy(${d.id})">更新策略</button>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <select id="sel-${d.id}" class="table-select">
+                                <option value="">未分配策略</option>
+                                ${policies.map(p => `<option value="${p.id}" ${d.policy_id === p.id ? 'selected' : ''}>${p.name}</option>`).join('')}
+                            </select>
+                            <button class="btn btn-info btn-sm" onclick="bindPolicy(${d.id})">更新</button>
+                        </div>
                     </td>
                     <td>
-                        <div style="display: flex; flex-direction: column; align-items: center; gap: 5px;">
-                            <span id="policy-status-${d.id}" style="font-size: 0.8rem; padding: 2px 8px; border-radius: 4px; ${d.policy_paused ? 'background: #fff3cd; color: #856404;' : 'background: #d4edda; color: #155724;'}">
-                                ${d.policy_paused ? '⏸ 已暂停' : '▶ 运行中'}
+                        <div class="policy-control">
+                            <span id="policy-status-${d.id}" class="policy-badge ${d.policy_paused ? 'policy-badge-paused' : 'policy-badge-running'}">
+                                ${d.policy_paused ? '已暂停' : '运行中'}
                             </span>
-                            <button id="pause-resume-btn-${d.id}" class="btn ${d.policy_paused ? 'btn-success' : 'btn-warning'}"
-                                style="padding: 6px 10px; font-size: 0.8rem;"
+                            <button id="pause-resume-btn-${d.id}" class="btn ${d.policy_paused ? 'btn-success' : 'btn-warning'} btn-sm"
                                 onclick="togglePolicyPause(${d.id}, ${d.policy_paused})">
-                                ${d.policy_paused ? '▶ 继续' : '⏸ 暂停'}
+                                ${d.policy_paused ? '继续' : '暂停'}
                             </button>
                         </div>
                     </td>
                     <td>
-                        <div style="display: flex; flex-wrap: wrap; gap: 5px;">
-                            <button class="btn btn-info" onclick="takeScreenshot(${d.id}, '${d.device_name}')">📺 远程控制</button>
-                            <button class="btn btn-success" onclick="confirmAdbInstall(${d.id}, '${d.device_name}')">安装APK</button>
-                            <button class="btn" style="background:#93259c" onclick="manageApps(${d.id}, '${d.device_name}')">📱 应用管理</button>
-                            <button class="btn btn-danger btn-outline" onclick="deleteDevice(${d.id})">移除</button>
+                        <div class="action-btn-group">
+                            <button class="btn btn-info btn-sm" onclick="takeScreenshot(${d.id}, '${d.device_name}')">远程控制</button>
+                            <button class="btn btn-sm" style="background: var(--purple);" onclick="manageApps(${d.id}, '${d.device_name}')">应用管理</button>
+                            <button class="btn btn-danger btn-outline btn-sm" onclick="deleteDevice(${d.id})">移除</button>
                         </div>
                     </td>
                 </tr>
             `}).join('');
         }
 
+        function getNetLabel(d) {
+            const nt = d.network_type;
+            if (nt === 'ethernet') return '有线';
+            if (nt === 'wifi') {
+                if (d.network_ssid && d.network_ssid !== '0x' && d.network_ssid !== '未连接' && d.network_ssid !== '0x0') {
+                    return d.network_ssid;
+                }
+                return 'WiFi';
+            }
+            if (nt === 'none') return '—';
+            if (d.eth_ip && d.eth_ip !== '0.0.0.0' && d.eth_ip !== null) return '有线';
+            if (d.wifi_ip && d.wifi_ip !== '0.0.0.0' && d.wifi_ip !== null) return 'WiFi';
+            return '—';
+        }
+
+        function renderOnlineStatus(d) {
+            const conn = connectivityData[d.id];
+            const netLabel = getNetLabel(d);
+            if (!conn) {
+                return `<span class="status-label ${d.online ? 'online' : 'offline'}"><span class="status-dot ${d.online ? 'status-dot-online' : 'status-dot-offline'}"></span>${d.online ? '在线' : '离线'}</span><br><span class="status-net-type">${netLabel}</span>`;
+            }
+            if (conn.ping && conn.adb) {
+                return `<span class="status-label online"><span class="status-dot status-dot-online"></span>在线</span><br><span class="status-check status-check-pass">Ping ✓ ADB ✓</span><br><span class="status-net-type">${netLabel}</span>`;
+            } else if (conn.ping && !conn.adb) {
+                return `<span class="status-label partial"><span class="status-dot status-dot-partial"></span>部分在线</span><br><span class="status-check status-check-pass">Ping ✓</span> <span class="status-check status-check-fail">ADB ✗</span><br><span class="status-reason">${conn.reason || 'ADB不可用'}</span><br><span class="status-net-type">${netLabel}</span>`;
+            } else {
+                return `<span class="status-label offline"><span class="status-dot status-dot-offline"></span>离线</span><br><span class="status-check status-check-fail">Ping ✗ ADB ✗</span><br><span class="status-reason">${conn.reason || '网络不可达'}</span><br><span class="status-net-type">${netLabel}</span>`;
+            }
+        }
+
         function parseUsage(usageStr) {
-            if (!usageStr || usageStr === 'N/A') return { percent: 0, color: '#e0e0e0' };
+            if (!usageStr || usageStr === 'N/A') return { percent: 0, color: '#e5e5ea' };
             try {
                 // Format: "123 MB / 1024 MB"
                 const parts = usageStr.split('/');
                 const used = parseInt(parts[0]);
                 const total = parseInt(parts[1]);
                 const percent = Math.round((used / total) * 100);
-                let color = '#34a853'; // green
-                if (percent > 70) color = '#f9ab00'; // yellow
-                if (percent > 90) color = '#ea4335'; // red
+                let color = '#34c759'; // Apple green
+                if (percent > 70) color = '#ff9500'; // Apple orange
+                if (percent > 90) color = '#ff3b30'; // Apple red
                 return { percent, color };
-            } catch(e) { return { percent: 0, color: '#e0e0e0' }; }
+            } catch(e) { return { percent: 0, color: '#e5e5ea' }; }
         }
 
         // Room Management
         function openRoomEdit(id, current) {
-            currentEditRoomDeviceId = id;
+            currentRoomDeviceId = id;
             document.getElementById('rName').value = current;
             document.getElementById('roomModal').style.display = 'block';
         }
         function closeRoomModal() { document.getElementById('roomModal').style.display = 'none'; }
         async function saveRoom() {
             const roomName = document.getElementById('rName').value;
-            const resp = await fetch(`/api/v1/devices/${currentEditRoomDeviceId}/room?room_name=${encodeURIComponent(roomName)}`, { method: 'POST' });
+            const resp = await fetch(`/api/v1/devices/${currentRoomDeviceId}/room?room_name=${encodeURIComponent(roomName)}`, { method: 'POST' });
             if (resp.ok) { closeRoomModal(); loadData(); }
         }
 
@@ -382,149 +1613,19 @@
         function showAddPolicy() { document.getElementById('policyModal').style.display = 'block'; }
         function closeModal() { document.getElementById('policyModal').style.display = 'none'; }
         function closeScreenshotModal() {
-            // 停止实时屏幕流
-            stopScreenStream();
-            
+            stopScrcpyStatusPolling();
+            stopAdbSchedule();
             document.getElementById('screenshotModal').style.display = 'none';
             currentRemoteDeviceId = null;
         }
-        
-        // 实时屏幕流功能
-        function toggleScreenStream() {
-            const btn = document.getElementById('streamToggleBtn');
-            if (btn.innerText.includes('开启')) {
-                startScreenStream();
-                btn.innerText = '⏸ 停止实时屏幕流';
-                btn.className = 'btn btn-danger';
-            } else {
-                stopScreenStream();
-                btn.innerText = '▶ 开启实时屏幕流';
-                btn.className = 'btn btn-success';
-            }
-        }
-        
-        function startScreenStream() {
-            if (!currentRemoteDeviceId) return;
-            
-            // 连接WebSocket
-            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${wsProtocol}//${window.location.host}/ws/devices/${currentRemoteDeviceId}/screen`;
-            screenWebSocket = new WebSocket(wsUrl);
-            
-            screenWebSocket.onopen = function() {
-                console.log('WebSocket连接已建立');
-                
-                // 开始轮询获取屏幕截图
-                screenStreamInterval = setInterval(async () => {
-                    try {
-                        const resp = await fetch(`/api/v1/devices/${currentRemoteDeviceId}/screen-stream`);
-                        const result = await resp.json();
-                        if (!result.ok) {
-                            console.error('屏幕流获取失败:', result.detail);
-                        }
-                    } catch (error) {
-                        console.error('屏幕流请求失败:', error);
-                    }
-                }, 500); // 每500毫秒获取一次屏幕截图
-            };
-            
-            screenWebSocket.onmessage = function(event) {
-                try {
-                    const data = JSON.parse(event.data);
-                    if (data.type === 'screenshot' && data.data) {
-                        // 更新屏幕图像
-                        const img = document.getElementById('screenshotImg');
-                        const loading = document.getElementById('screenshotLoading');
-                        
-                        img.src = `data:image/png;base64,${data.data}`;
-                        img.style.display = 'block';
-                        loading.style.display = 'none';
-                    }
-                } catch (error) {
-                    console.error('WebSocket消息处理失败:', error);
-                }
-            };
-            
-            screenWebSocket.onerror = function(error) {
-                console.error('WebSocket错误:', error);
-                stopScreenStream();
-            };
-            
-            screenWebSocket.onclose = function() {
-                console.log('WebSocket连接已关闭');
-                stopScreenStream();
-            };
-        }
-        
-        function stopScreenStream() {
-            // 清除轮询间隔
-            if (screenStreamInterval) {
-                clearInterval(screenStreamInterval);
-                screenStreamInterval = null;
-            }
-            
-            // 关闭WebSocket连接
-            if (screenWebSocket) {
-                screenWebSocket.close();
-                screenWebSocket = null;
-            }
-            
-            // 重置按钮状态
-            const btn = document.getElementById('streamToggleBtn');
-            if (btn) {
-                btn.innerText = '▶ 开启实时屏幕流';
-                btn.className = 'btn btn-success';
-            }
-        }
-        
-        // 修改现有的屏幕点击处理函数，通过WebSocket发送点击事件
-        async function handleScreenClick(event) {
-            if (!currentRemoteDeviceId) return;
-            
-            const img = event.target;
-            const rect = img.getBoundingClientRect();
-            const x = Math.round((event.clientX - rect.left) / rect.width * 1920);
-            const y = Math.round((event.clientY - rect.top) / rect.height * 1080);
-            
-            // 如果WebSocket已连接，通过WebSocket发送点击事件
-            if (screenWebSocket && screenWebSocket.readyState === WebSocket.OPEN) {
-                screenWebSocket.send(JSON.stringify({
-                    type: 'control',
-                    action: 'tap',
-                    x: x,
-                    y: y
-                }));
-            } else {
-                // 否则使用传统的HTTP请求
-                const resp = await fetch(`/api/v1/devices/${currentRemoteDeviceId}/input?action=tap&x=${x}&y=${y}`, { method: 'POST' });
-                const result = await resp.json();
-                if (result.ok) {
-                    setTimeout(() => { document.getElementById('refreshScreenshotBtn').click(); }, 800);
-                }
-            }
-        }
-        
-        // 修改现有的按键发送函数，通过WebSocket发送按键事件
+
         async function sendKey(key) {
             if (!currentRemoteDeviceId) return;
-            
-            // 如果WebSocket已连接，通过WebSocket发送按键事件
-            if (screenWebSocket && screenWebSocket.readyState === WebSocket.OPEN) {
-                screenWebSocket.send(JSON.stringify({
-                    type: 'control',
-                    action: 'key',
-                    key: key
-                }));
-            } else {
-                // 否则使用传统的HTTP请求
-                const resp = await fetch(`/api/v1/devices/${currentRemoteDeviceId}/input?action=key&key=${key}`, { method: 'POST' });
-                const result = await resp.json();
-                if (result.ok) {
-                    setTimeout(() => { document.getElementById('refreshScreenshotBtn').click(); }, 800);
-                }
-            }
+            try {
+                await fetch(`/api/v1/devices/${currentRemoteDeviceId}/input?action=key&key=${key}`, { method: 'POST' });
+            } catch(e) {}
         }
-        
+
         function toggleInputs() {
             const mode = document.getElementById('pMode').value;
             document.getElementById('appInputGroup').style.display = mode === 'app' ? 'block' : 'none';
@@ -540,131 +1641,200 @@
         async function takeScreenshot(deviceId, deviceName) {
             currentRemoteDeviceId = deviceId;
             document.getElementById('screenshotModal').style.display = 'block';
-            document.getElementById('screenshotTitle').innerText = `正在控制: ${deviceName}`;
-            document.getElementById('screenshotLoading').style.display = 'block';
-            document.getElementById('screenshotImg').style.display = 'none';
-            
-            // 清空控制区域
-            const controlsDiv = document.querySelector('.remote-controls');
-            controlsDiv.innerHTML = '';
-            
-            // 添加Scrcpy控制选项
-            const scrcpyControl = document.createElement('div');
-            scrcpyControl.style.marginBottom = '20px';
-            scrcpyControl.innerHTML = `
-                <div style="margin-bottom: 10px;">
-                    <h4 style="margin: 0 0 10px 0; color: var(--text-primary);">🔧 Scrcpy高级控制</h4>
-                    <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 15px;">
-                        💡 使用Scrcpy实现真正的实时屏幕镜像和低延迟控制
-                    </div>
-                </div>
-                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                    <button id="checkScrcpyBtn" class="btn btn-info" onclick="checkScrcpyInstallation()">
-                        🔍 检查Scrcpy
-                    </button>
-                    <button id="startScrcpyBtn" class="btn btn-success" onclick="startScrcpySession(${deviceId})">
-                        🚀 启动Scrcpy
-                    </button>
-                    <button id="stopScrcpyBtn" class="btn btn-danger" onclick="stopScrcpySession(${deviceId})" style="display: none;">
-                        ⏹ 停止Scrcpy
-                    </button>
-                    <button id="getScrcpyCmdBtn" class="btn btn-secondary" onclick="getScrcpyCommand(${deviceId})">
-                        📋 获取命令
-                    </button>
-                </div>
-                <div id="scrcpyStatus" style="margin-top: 10px; font-size: 0.85rem; color: var(--text-secondary);"></div>
-            `;
-            controlsDiv.appendChild(scrcpyControl);
-            
-            // 添加ADB连接控制
-            const adbControl = document.createElement('div');
-            adbControl.style.marginBottom = '20px';
-            adbControl.innerHTML = `
-                <div style="margin-bottom: 10px;">
-                    <h4 style="margin: 0 0 10px 0; color: var(--text-primary);">🔗 ADB连接管理</h4>
-                </div>
-                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                    <button id="adbConnectBtn" class="btn btn-primary" onclick="adbConnectDevice(${deviceId})">
-                        🔌 连接ADB
-                    </button>
-                    <button id="adbDisconnectBtn" class="btn btn-warning" onclick="adbDisconnectDevice(${deviceId})">
-                        🔋 断开ADB
-                    </button>
-                </div>
-                <div id="adbStatus" style="margin-top: 10px; font-size: 0.85rem; color: var(--text-secondary);"></div>
-            `;
-            controlsDiv.appendChild(adbControl);
-            
-            // 添加传统截图控制
-            const screenshotControl = document.createElement('div');
-            screenshotControl.style.marginBottom = '20px';
-            screenshotControl.innerHTML = `
-                <div style="margin-bottom: 10px;">
-                    <h4 style="margin: 0 0 10px 0; color: var(--text-primary);">📸 传统截图控制</h4>
-                    <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 15px;">
-                        💡 基础截图功能，适合简单操作
-                    </div>
-                </div>
-                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                    <button id="refreshScreenshotBtn" class="btn btn-secondary" onclick="takeScreenshot(${deviceId}, '${deviceName}')">
-                        🔄 刷新截图
-                    </button>
-                    <button class="btn btn-outline-secondary" onclick="showScrcpyHelp()">
-                        ❓ 使用帮助
-                    </button>
-                </div>
-            `;
-            controlsDiv.appendChild(screenshotControl);
-            
-            // 添加遥控器按钮
-            const remoteControl = document.createElement('div');
-            remoteControl.innerHTML = `
-                <div style="margin-bottom: 10px;">
-                    <h4 style="margin: 0 0 10px 0; color: var(--text-primary);">🎮 遥控器按钮</h4>
-                </div>
-                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
-                    <button class="btn btn-outline-primary" onclick="sendKey('KEYCODE_DPAD_UP')">⬆️ 上</button>
-                    <button class="btn btn-outline-primary" onclick="sendKey('KEYCODE_DPAD_LEFT')">⬅️ 左</button>
-                    <button class="btn btn-outline-primary" onclick="sendKey('KEYCODE_DPAD_RIGHT')">➡️ 右</button>
-                    <button class="btn btn-outline-primary" onclick="sendKey('KEYCODE_DPAD_DOWN')">⬇️ 下</button>
-                    <button class="btn btn-outline-success" onclick="sendKey('KEYCODE_ENTER')">⏎ 确定</button>
-                    <button class="btn btn-outline-warning" onclick="sendKey('KEYCODE_BACK')">↩️ 返回</button>
-                    <button class="btn btn-outline-info" onclick="sendKey('KEYCODE_HOME')">🏠 主页</button>
-                    <button class="btn btn-outline-secondary" onclick="sendKey('KEYCODE_MENU')">📋 菜单</button>
-                    <button class="btn btn-outline-danger" onclick="sendKey('KEYCODE_VOLUME_UP')">🔊 音量+</button>
-                    <button class="btn btn-outline-danger" onclick="sendKey('KEYCODE_VOLUME_DOWN')">🔉 音量-</button>
-                    <button class="btn btn-outline-dark" onclick="sendKey('KEYCODE_POWER')">⏻ 电源</button>
-                </div>
-            `;
-            controlsDiv.appendChild(remoteControl);
+            document.getElementById('screenshotTitle').innerText = `远程控制: ${deviceName}`;
 
-            // 初始加载截图
-            takeScreenshot(deviceId, deviceName);
-            
+            const controlsDiv = document.getElementById('remoteControlsArea');
+            controlsDiv.innerHTML = `
+                <!-- Scrcpy 高级控制 -->
+                <div class="section-card">
+                    <h4 class="section-title">Scrcpy 高级控制</h4>
+                    <div style="font-size:14px; color:var(--gray-600); margin-bottom:14px;">
+                        使用Scrcpy实现实时屏幕镜像和低延迟控制
+                    </div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button id="checkScrcpyBtn" class="btn btn-info btn-sm" onclick="checkScrcpyInstallation()">检查 Scrcpy</button>
+                        <button id="startScrcpyBtn" class="btn btn-success btn-sm" onclick="startScrcpySession(${deviceId})">启动 Scrcpy</button>
+                        <button id="stopScrcpyBtn" class="btn btn-danger btn-sm" onclick="stopScrcpySession(${deviceId})" style="display:none;">停止 Scrcpy</button>
+                        <button id="getScrcpyCmdBtn" class="btn btn-sm" style="background: var(--gray-600);" onclick="getScrcpyCommand(${deviceId})">获取命令</button>
+                    </div>
+                    <div id="scrcpyStatus" style="margin-top:12px; font-size:14px; color:var(--gray-600);"></div>
+                </div>
+
+                <!-- ADB 连接管理 -->
+                <div class="section-card">
+                    <h4 class="section-title">ADB 连接管理</h4>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button id="adbConnectBtn" class="btn btn-sm" onclick="adbConnectDevice(${deviceId})">连接 ADB</button>
+                        <button id="adbDisconnectBtn" class="btn btn-warning btn-sm" onclick="adbDisconnectDevice(${deviceId})">断开 ADB</button>
+                    </div>
+                    <div id="adbStatus" style="margin-top:12px; font-size:14px; color:var(--gray-600);"></div>
+                </div>
+
+                <!-- 遥控器按钮 -->
+                <div class="section-card">
+                    <h4 class="section-title">遥控器按钮</h4>
+                    <div class="remote-btn-grid">
+                        <button class="btn btn-sm" style="background: var(--indigo);" onclick="sendKey('KEYCODE_DPAD_UP')">上</button>
+                        <button class="btn btn-sm" style="background: var(--indigo);" onclick="sendKey('KEYCODE_DPAD_LEFT')">左</button>
+                        <button class="btn btn-sm" style="background: var(--indigo);" onclick="sendKey('KEYCODE_DPAD_RIGHT')">右</button>
+                        <button class="btn btn-sm" style="background: var(--indigo);" onclick="sendKey('KEYCODE_DPAD_DOWN')">下</button>
+                        <button class="btn btn-success btn-sm" onclick="sendKey('KEYCODE_ENTER')">确定</button>
+                        <button class="btn btn-warning btn-sm" onclick="sendKey('KEYCODE_BACK')">返回</button>
+                        <button class="btn btn-info btn-sm" onclick="sendKey('KEYCODE_HOME')">主页</button>
+                        <button class="btn btn-sm" style="background: var(--gray-600);" onclick="sendKey('KEYCODE_MENU')">菜单</button>
+                        <button class="btn btn-danger btn-sm" onclick="sendKey('KEYCODE_VOLUME_UP')">音量+</button>
+                        <button class="btn btn-danger btn-sm" onclick="sendKey('KEYCODE_VOLUME_DOWN')">音量-</button>
+                        <button class="btn btn-sm" style="background: var(--gray-800);" onclick="sendKey('KEYCODE_POWER')">电源</button>
+                    </div>
+                </div>
+            `;
+
             // 检查Scrcpy状态
             checkScrcpyInstallation();
         }
 
-        async function sendKey(key) {
-            if (!currentRemoteDeviceId) return;
-            const resp = await fetch(`/api/v1/devices/${currentRemoteDeviceId}/input?action=key&key=${key}`, { method: 'POST' });
-            const result = await resp.json();
-            if (result.ok) {
-                setTimeout(() => { document.getElementById('refreshScreenshotBtn').click(); }, 800);
+        // ==================== 顶部 Scrcpy 快速连接 ====================
+        async function scrcpyConnectByIpTop() {
+            const ip = document.getElementById('scrcpyIpTop').value.trim();
+            if (!ip) return alert('请输入电视IP地址');
+            const port = document.getElementById('scrcpyPortTop').value.trim() || '5555';
+            const btn = event.target;
+            const oldText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '连接中...';
+
+            try {
+                const resp = await fetch(`/api/v1/scrcpy/connect-by-ip?ip=${encodeURIComponent(ip)}`, { method: 'POST' });
+                const result = await resp.json();
+                if (result.ok) {
+                    alert(result.message);
+                } else {
+                    alert(result.message);
+                }
+            } catch(e) {
+                alert('连接失败: ' + (e.message || '网络异常'));
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = oldText;
             }
         }
 
-        async function handleScreenClick(event) {
-            if (!currentRemoteDeviceId) return;
-            const img = event.target;
-            const rect = img.getBoundingClientRect();
-            const x = Math.round((event.clientX - rect.left) / rect.width * 1920);
-            const y = Math.round((event.clientY - rect.top) / rect.height * 1080);
-            const resp = await fetch(`/api/v1/devices/${currentRemoteDeviceId}/input?action=tap&x=${x}&y=${y}`, { method: 'POST' });
-            const result = await resp.json();
-            if (result.ok) {
-                setTimeout(() => { document.getElementById('refreshScreenshotBtn').click(); }, 800);
+        // ==================== ADB 控制台 ====================
+        async function openAdbConsole() {
+            document.getElementById('adbConsoleModal').style.display = 'block';
+            // 填充设备列表（使用缓存数据）
+            const select = document.getElementById('adbConsoleDevice');
+            const curVal = select.value;
+            select.innerHTML = '<option value="">-- 选择设备 --</option>';
+            allDevices.forEach(d => {
+                const opt = document.createElement('option');
+                opt.value = d.id;
+                const ip = (d.eth_ip && d.eth_ip !== '0.0.0.0') ? d.eth_ip : d.wifi_ip;
+                const roomName = d.room_name || '';
+                opt.textContent = roomName ? `${roomName} (${d.device_name} - ${ip})` : `${d.device_name} (${ip})`;
+                select.appendChild(opt);
+            });
+            select.value = curVal;
+            // 当选择设备时，清空IP输入框
+            select.onchange = () => { if (select.value) document.getElementById('adbConsoleIpInput').value = ''; };
+        }
+
+        function closeAdbConsole() {
+            stopAdbSchedule();
+            document.getElementById('adbConsoleModal').style.display = 'none';
+        }
+
+        function fillAdbConsoleCmd(cmd) {
+            document.getElementById('adbConsoleCmdInput').value = cmd;
+            document.getElementById('adbConsoleCmdInput').focus();
+        }
+
+        async function executeAdbConsoleCmd() {
+            const deviceId = document.getElementById('adbConsoleDevice').value;
+            const directIp = document.getElementById('adbConsoleIpInput').value.trim();
+            if (!deviceId && !directIp) return alert('请先选择设备或输入IP地址');
+            const cmd = document.getElementById('adbConsoleCmdInput').value.trim();
+            if (!cmd) return;
+
+            const outputDiv = document.getElementById('adbConsoleOutput');
+            const execBtn = document.getElementById('adbConsoleExecBtn');
+            execBtn.disabled = true;
+            execBtn.innerHTML = '执行中...';
+            const target = directIp ? directIp : deviceId;
+            outputDiv.innerHTML += `\n> adb ${cmd} [${directIp ? 'IP:' + directIp : '设备'}]\n`;
+
+            try {
+                let resp;
+                if (directIp) {
+                    resp = await fetch(`/api/v1/adb/shell-by-ip?ip=${encodeURIComponent(directIp)}&command=${encodeURIComponent(cmd)}`, { method: 'POST' });
+                } else {
+                    resp = await fetch(`/api/v1/devices/${deviceId}/adb/shell?command=${encodeURIComponent(cmd)}`, { method: 'POST' });
+                }
+                const result = await resp.json();
+                if (result.ok) {
+                    outputDiv.innerHTML += result.output || '(无输出)';
+                } else {
+                    outputDiv.innerHTML += `Error: ${result.output || result.detail || '命令执行失败'}`;
+                }
+                if (result.exit_code !== undefined && result.exit_code !== 0) {
+                    outputDiv.innerHTML += `\nexit code: ${result.exit_code}`;
+                }
+            } catch(e) {
+                outputDiv.innerHTML += `Network error: ${e.message}`;
             }
+
+            outputDiv.innerHTML += '\n';
+            outputDiv.scrollTop = outputDiv.scrollHeight;
+            execBtn.disabled = false;
+            execBtn.innerHTML = '执行';
+        }
+
+        function startAdbSchedule() {
+            const deviceId = document.getElementById('adbConsoleDevice').value;
+            const directIp = document.getElementById('adbConsoleIpInput').value.trim();
+            if (!deviceId && !directIp) return alert('请先选择设备或输入IP地址');
+            const cmd = document.getElementById('adbConsoleCmdInput').value.trim();
+            if (!cmd) return alert('请先输入命令');
+            const interval = parseInt(document.getElementById('adbScheduleInterval').value) || 5;
+            const maxCount = parseInt(document.getElementById('adbScheduleCount').value) || 0;
+            if (interval < 1) return alert('间隔不能小于1秒');
+
+            stopAdbSchedule();
+            adbScheduleCount = 0;
+            const statusDiv = document.getElementById('adbScheduleStatus');
+            const stopBtn = document.getElementById('adbConsoleStopBtn');
+            const startBtn = document.getElementById('adbStartScheduleBtn');
+            statusDiv.style.display = 'block';
+            stopBtn.style.display = 'inline-block';
+            startBtn.style.display = 'none';
+
+            executeAdbConsoleCmd();
+            adbScheduleCount++;
+
+            adbScheduleInterval = setInterval(() => {
+                adbScheduleCount++;
+                if (maxCount > 0 && adbScheduleCount >= maxCount) {
+                    stopAdbSchedule();
+                    return;
+                }
+                statusDiv.innerHTML = `已执行 ${adbScheduleCount} 次${maxCount > 0 ? ' / ' + maxCount + ' 次' : ''}`;
+                executeAdbConsoleCmd();
+            }, interval * 1000);
+
+            statusDiv.innerHTML = `已执行 ${adbScheduleCount} 次${maxCount > 0 ? ' / ' + maxCount + ' 次' : ''}，间隔 ${interval}s`;
+        }
+
+        function stopAdbSchedule() {
+            if (adbScheduleInterval) {
+                clearInterval(adbScheduleInterval);
+                adbScheduleInterval = null;
+            }
+            const statusDiv = document.getElementById('adbScheduleStatus');
+            const stopBtn = document.getElementById('adbConsoleStopBtn');
+            const startBtn = document.getElementById('adbStartScheduleBtn');
+            if (statusDiv) statusDiv.style.display = 'none';
+            if (stopBtn) stopBtn.style.display = 'none';
+            if (startBtn) startBtn.style.display = 'inline-block';
         }
 
         async function savePolicy() {
@@ -717,18 +1887,16 @@
                     const btn = document.getElementById(`pause-resume-btn-${deviceId}`);
 
                     if (isPaused) {
-                        statusSpan.textContent = '▶ 运行中';
-                        statusSpan.style.background = '#d4edda';
-                        statusSpan.style.color = '#155724';
-                        btn.textContent = '⏸ 暂停';
-                        btn.className = 'btn btn-warning';
+                        statusSpan.textContent = '运行中';
+                        statusSpan.className = 'policy-badge policy-badge-running';
+                        btn.textContent = '暂停';
+                        btn.className = 'btn btn-warning btn-sm';
                         btn.setAttribute('onclick', `togglePolicyPause(${deviceId}, false)`);
                     } else {
-                        statusSpan.textContent = '⏸ 已暂停';
-                        statusSpan.style.background = '#fff3cd';
-                        statusSpan.style.color = '#856404';
-                        btn.textContent = '▶ 继续';
-                        btn.className = 'btn btn-success';
+                        statusSpan.textContent = '已暂停';
+                        statusSpan.className = 'policy-badge policy-badge-paused';
+                        btn.textContent = '继续';
+                        btn.className = 'btn btn-success btn-sm';
                         btn.setAttribute('onclick', `togglePolicyPause(${deviceId}, true)`);
                     }
                     alert(`策略已${action}`);
@@ -736,7 +1904,7 @@
                     alert(`操作失败: ${result.detail}`);
                 }
             } catch (e) {
-                alert('网络错误');
+                alert('网络连接异常，请检查后端服务是否运行');
             }
         }
 
@@ -762,30 +1930,120 @@
             currentAppDeviceId = deviceId;
             document.getElementById('appModalTitle').innerText = `应用管理 - ${deviceName}`;
             document.getElementById('appModal').style.display = 'block';
-            const devices = await (await fetch('/api/v1/devices')).json();
-            const device = devices.find(d => d.id === deviceId);
+            const device = allDevices.find(d => d.id === deviceId);
             const appList = document.getElementById('appList');
             if (device && device.installed_apps) {
                 try {
-                    const apps = JSON.parse(device.installed_apps);
-                    appList.innerHTML = apps.map(app => `
-                        <div class="app-item">
-                            <span class="app-name"><code>${app}</code></span>
-                            <button class="btn btn-danger btn-outline" style="padding: 2px 8px; font-size: 0.75rem;" onclick="uninstallApp('${app}')">卸载</button>
-                        </div>
-                    `).join('');
-                } catch(e) { appList.innerHTML = '<div style="padding: 20px; color: #999;">无法解析应用列表</div>'; }
-            } else { appList.innerHTML = '<div style="padding: 20px; color: #999;">未获取到应用列表</div>'; }
+                    let apps = JSON.parse(device.installed_apps);
+                    // Default sort: alphabetical
+                    apps.sort((a, b) => a.localeCompare(b));
+                    // Store for re-sorting
+                    window._currentAppList = apps;
+                    // Fetch disabled apps list from device
+                    window._disabledApps = [];
+                    const ip = (device.eth_ip && device.eth_ip !== '0.0.0.0') ? device.eth_ip : device.wifi_ip;
+                    if (ip) {
+                        try {
+                            const resp = await fetch(`/api/v1/devices/${deviceId}/adb/shell?command=${encodeURIComponent('shell pm list packages -d')}`, { method: 'POST' });
+                            const result = await resp.json();
+                            if (result.ok && result.output) {
+                                window._disabledApps = result.output.split('\n')
+                                    .map(l => l.replace('package:', '').trim())
+                                    .filter(p => p.length > 0);
+                            }
+                        } catch(e) { console.warn('Failed to fetch disabled apps:', e); }
+                    }
+                    renderAppList(apps);
+                } catch(e) { appList.innerHTML = '<div class="empty-state">无法解析应用列表</div>'; }
+            } else { appList.innerHTML = '<div class="empty-state">未获取到应用列表</div>'; }
+        }
+
+        function sortApps(mode) {
+            let apps = [...(window._currentAppList || [])];
+            const systemPrefixes = ['com.android.', 'com.xiaomi.', 'com.miui.', 'com.mitv.', 'android.'];
+            if (mode === 'alpha') {
+                apps.sort((a, b) => a.localeCompare(b));
+            } else if (mode === 'system-first') {
+                apps.sort((a, b) => {
+                    const aSys = systemPrefixes.some(p => a.startsWith(p));
+                    const bSys = systemPrefixes.some(p => b.startsWith(p));
+                    if (aSys !== bSys) return aSys ? -1 : 1;
+                    return a.localeCompare(b);
+                });
+            } else if (mode === 'user-first') {
+                apps.sort((a, b) => {
+                    const aSys = systemPrefixes.some(p => a.startsWith(p));
+                    const bSys = systemPrefixes.some(p => b.startsWith(p));
+                    if (aSys !== bSys) return aSys ? 1 : -1;
+                    return a.localeCompare(b);
+                });
+            }
+            renderAppList(apps);
+        }
+
+        function renderAppList(apps) {
+            const appList = document.getElementById('appList');
+            const systemPrefixes = ['com.android.', 'com.xiaomi.', 'com.miui.', 'com.mitv.', 'android.'];
+            const disabledApps = window._disabledApps || [];
+            const disabledCount = apps.filter(a => disabledApps.includes(a)).length;
+            appList.innerHTML = `
+                <div class="app-sort-bar">
+                    <span class="app-sort-label">排序:</span>
+                    <button class="btn btn-sm" style="background: var(--indigo);" onclick="sortApps('alpha')">A-Z</button>
+                    <button class="btn btn-sm" style="background: var(--indigo);" onclick="sortApps('system-first')">系统优先</button>
+                    <button class="btn btn-sm" style="background: var(--indigo);" onclick="sortApps('user-first')">第三方优先</button>
+                    <span class="app-count">共 ${apps.length} 个应用${disabledCount > 0 ? `，<span style="color:var(--red);">${disabledCount} 个已停用</span>` : ''}</span>
+                </div>
+            ` + apps.map(app => {
+                const isSystem = systemPrefixes.some(p => app.startsWith(p));
+                const isDisabled = disabledApps.includes(app);
+                const bgColor = isDisabled ? 'rgba(255,149,0,0.04)' : '#ffffff';
+                const textColor = isDisabled ? '#aeaeb2' : 'inherit';
+                const tags = [];
+                if (isSystem) tags.push('<span class="app-tag app-tag-system">系统</span>');
+                if (isDisabled) tags.push('<span class="app-tag app-tag-disabled">停用</span>');
+                return `<div class="app-item" style="background:${bgColor};">
+                    <span class="app-name" style="flex:1;min-width:0;"><code style="color:${textColor};${isDisabled ? 'text-decoration:line-through;' : ''}">${app}</code> ${tags.join(' ')}</span>
+                    ${isDisabled
+                        ? `<button class="btn btn-success btn-sm" onclick="enableApp('${app}')">启用</button>`
+                        : `<button class="btn btn-info btn-outline btn-sm" onclick="launchApp('${app}')">启动</button>
+                           <button class="btn btn-warning btn-outline btn-sm" onclick="disableApp('${app}')">停用</button>`}
+                    ${!isSystem && !isDisabled ? `<button class="btn btn-danger btn-outline btn-sm" onclick="uninstallApp('${app}', false)">卸载</button>` : ''}
+                </div>`;
+            }).join('');
         }
 
         function closeAppModal() { document.getElementById('appModal').style.display = 'none'; }
 
-        async function uninstallApp(packageName) {
-            if (!confirm(`确定卸载 ${packageName}？`)) return;
-            const resp = await fetch(`/api/v1/devices/${currentAppDeviceId}/uninstall?package_name=${encodeURIComponent(packageName)}`, { method: 'POST' });
+        async function disableApp(packageName) {
+            if (!confirm(`确定停用 ${packageName}？\n（应用将被禁用，可通过恢复出厂设置恢复）`)) return;
+            const resp = await fetch(`/api/v1/devices/${currentAppDeviceId}/uninstall?package_name=${encodeURIComponent(packageName)}&is_system=true`, { method: 'POST' });
             const result = await resp.json();
-            if (result.ok) { alert('卸载成功'); manageApps(currentAppDeviceId, ''); }
+            if (result.ok) { alert(result.message || '停用成功'); manageApps(currentAppDeviceId, ''); }
+            else alert('停用失败: ' + result.detail);
+        }
+
+        async function uninstallApp(packageName, isSystem) {
+            if (!confirm(`确定卸载 ${packageName}？`)) return;
+            const resp = await fetch(`/api/v1/devices/${currentAppDeviceId}/uninstall?package_name=${encodeURIComponent(packageName)}&is_system=false`, { method: 'POST' });
+            const result = await resp.json();
+            if (result.ok) { alert(result.message || '卸载成功'); manageApps(currentAppDeviceId, ''); }
             else alert('卸载失败: ' + result.detail);
+        }
+
+        async function launchApp(packageName) {
+            const resp = await fetch(`/api/v1/devices/${currentAppDeviceId}/launch-app?package_name=${encodeURIComponent(packageName)}`, { method: 'POST' });
+            const result = await resp.json();
+            if (result.ok) { alert('已发送启动命令'); }
+            else alert('启动失败: ' + result.detail);
+        }
+
+        async function enableApp(packageName) {
+            if (!confirm(`确定启用 ${packageName}？`)) return;
+            const resp = await fetch(`/api/v1/devices/${currentAppDeviceId}/enable-app?package_name=${encodeURIComponent(packageName)}`, { method: 'POST' });
+            const result = await resp.json();
+            if (result.ok) { alert(result.message || '启用成功'); manageApps(currentAppDeviceId, ''); }
+            else alert('启用失败: ' + result.detail);
         }
 
         async function uploadApk() {
@@ -806,19 +2064,43 @@
             } catch(e) { alert('操作失败'); }
         }
 
+        async function silentUpgrade() {
+            if (!confirm('确定要静默升级管理应用吗？\n将安装最新版APP到电视，安装完成后应用会自动重启。')) return;
+            const btn = event.target;
+            const oldText = btn.innerText;
+            btn.innerText = '升级中...';
+            btn.disabled = true;
+            try {
+                const resp = await fetch(`/api/v1/devices/${currentAppDeviceId}/silent-upgrade`, { method: 'POST' });
+                const result = await resp.json();
+                if (result.ok) {
+                    alert('升级成功！' + (result.message || ''));
+                    closeAppModal();
+                    loadData();
+                } else {
+                    alert('升级失败: ' + result.detail);
+                }
+            } catch(e) {
+                alert('操作失败: ' + e.message);
+            } finally {
+                btn.innerText = oldText;
+                btn.disabled = false;
+            }
+        }
+
         async function showLogs() {
             document.getElementById('logModal').style.display = 'block';
             const logs = await (await fetch('/api/v1/logs')).json();
             const logList = document.getElementById('logList');
             const actionMap = { 'bind_policy': '策略绑定', 'screenshot': '远程控制', 'adb_install': '安装APK', 'uninstall': '卸载应用', 'install_uploaded': '上传安装', 'delete_policy': '删除策略', 'delete_device': '移除设备', 'update_room': '修改会议室' };
-            logList.innerHTML = logs.length === 0 ? '<div style="padding: 40px; text-align: center; color: #999;">暂无日志记录</div>' : logs.map(log => `
-                <div style="padding: 12px 15px; border-bottom: 1px solid #eee;">
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                        <span style="color:var(--primary); font-weight:600;">[${actionMap[log.action] || log.action}]</span>
-                        <span style="color:#999; font-size:0.8rem;">${log.created_at.replace('T', ' ').substring(0, 19)}</span>
+            logList.innerHTML = logs.length === 0 ? '<div class="empty-state">暂无日志记录</div>' : logs.map(log => `
+                <div class="log-entry">
+                    <div class="log-entry-header">
+                        <span class="log-action">[${actionMap[log.action] || log.action}]</span>
+                        <span class="log-time">${log.created_at.replace('T', ' ').substring(0, 19)}</span>
                     </div>
-                    <div style="font-size: 0.9rem;">${log.detail}</div>
-                    ${log.device_name ? `<div style="color:#70757a; font-size:0.75rem; margin-top:4px;">📍 ${log.device_name}</div>` : ''}
+                    <div class="log-detail">${log.detail}</div>
+                    ${log.device_name ? `<div class="log-device">${log.device_name}</div>` : ''}
                 </div>
             `).join('');
         }
@@ -829,7 +2111,7 @@
         async function remoteDeploy() {
             const ip = document.getElementById('deployIp').value.trim();
             if (!ip) return alert('请输入有效的 IP 地址');
-            
+
             const btn = event.target;
             const oldText = btn.innerText;
             btn.innerText = "部署中...";
@@ -854,279 +2136,338 @@
         }
 
         // ==================== Scrcpy相关函数 ====================
-        
+
         async function checkScrcpyInstallation() {
             try {
                 const resp = await fetch('/api/v1/scrcpy/check');
                 const result = await resp.json();
-                
+
                 const statusDiv = document.getElementById('scrcpyStatus');
                 if (result.ok && result.installed) {
-                    statusDiv.innerHTML = `<span style="color: #28a745;">✅ ${result.message}</span>`;
-                    document.getElementById('checkScrcpyBtn').innerHTML = '✅ Scrcpy已安装';
-                    document.getElementById('checkScrcpyBtn').className = 'btn btn-success';
+                    statusDiv.innerHTML = `<span style="color: var(--green);">${result.message}</span>`;
+                    document.getElementById('checkScrcpyBtn').innerHTML = 'Scrcpy已安装';
+                    document.getElementById('checkScrcpyBtn').className = 'btn btn-success btn-sm';
+                    // Hide install buttons if they exist
+                    const installArea = document.getElementById('scrcpyInstallArea');
+                    if (installArea) installArea.style.display = 'none';
                 } else {
-                    statusDiv.innerHTML = `<span style="color: #dc3545;">❌ ${result.message}</span>`;
-                    document.getElementById('checkScrcpyBtn').innerHTML = '❌ Scrcpy未安装';
-                    document.getElementById('checkScrcpyBtn').className = 'btn btn-danger';
+                    statusDiv.innerHTML = `<span style="color: var(--red);">${result.message}</span>`;
+                    document.getElementById('checkScrcpyBtn').innerHTML = 'Scrcpy未安装';
+                    document.getElementById('checkScrcpyBtn').className = 'btn btn-danger btn-sm';
+                    // Show install buttons
+                    let installArea = document.getElementById('scrcpyInstallArea');
+                    if (!installArea) {
+                        installArea = document.createElement('div');
+                        installArea.id = 'scrcpyInstallArea';
+                        installArea.style.cssText = 'margin-top:14px; padding:16px; background:var(--gray-50); border-radius:14px; border:1px dashed #d2d2d7;';
+                        installArea.innerHTML = `
+                            <div style="font-size:14px; margin-bottom:10px; color:var(--gray-800);">Scrcpy未安装，请选择以下方式安装：</div>
+                            <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                                <button class="btn btn-success btn-sm" onclick="autoInstallScrcpy()">一键自动安装</button>
+                                <a href="/api/v1/scrcpy/download-script" class="btn btn-info btn-sm" style="text-decoration:none; color:#fff;" download>下载安装脚本</a>
+                            </div>
+                            <div id="scrcpyInstallStatus" style="margin-top:10px; font-size:13px; color:var(--gray-600);"></div>
+                        `;
+                        statusDiv.parentNode.insertBefore(installArea, statusDiv.nextSibling);
+                    } else {
+                        installArea.style.display = 'block';
+                    }
                 }
             } catch (error) {
                 const statusDiv = document.getElementById('scrcpyStatus');
-                statusDiv.innerHTML = `<span style="color: #dc3545;">❌ 检查失败: ${error.message}</span>`;
+                    statusDiv.innerHTML = `<span style="color: var(--red);">Scrcpy检查失败: ${error.message || '网络异常'}</span>`;
             }
         }
-        
+
+        async function autoInstallScrcpy() {
+            const statusDiv = document.getElementById('scrcpyInstallStatus');
+            const btn = event.target;
+            const oldText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '安装中...';
+            statusDiv.innerHTML = '<span style="color:#9a5c00;">正在自动下载并安装Scrcpy，请耐心等待（可能需要1-2分钟）...</span>';
+
+            try {
+                const resp = await fetch('/api/v1/scrcpy/auto-install', { method: 'POST' });
+                const result = await resp.json();
+
+                if (result.ok) {
+                    statusDiv.innerHTML = `<span style="color:var(--green);">${result.message}</span>`;
+                    // Re-check installation status
+                    setTimeout(() => checkScrcpyInstallation(), 1000);
+                } else {
+                    statusDiv.innerHTML = `<span style="color:var(--red);">Scrcpy安装失败: ${result.detail}</span>`;
+                    btn.disabled = false;
+                    btn.innerHTML = oldText;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `<span style="color:var(--red);">Scrcpy安装请求失败: ${error.message || '网络异常'}</span>`;
+                btn.disabled = false;
+                btn.innerHTML = oldText;
+            }
+        }
+
         async function startScrcpySession(deviceId) {
             if (!confirm('启动Scrcpy将打开一个新窗口进行实时屏幕控制。确认启动吗？')) {
                 return;
             }
-            
+
             const startBtn = document.getElementById('startScrcpyBtn');
             const stopBtn = document.getElementById('stopScrcpyBtn');
             const statusDiv = document.getElementById('scrcpyStatus');
-            
+
             startBtn.disabled = true;
-            startBtn.innerHTML = '⏳ 启动中...';
-            
+            startBtn.innerHTML = '启动中...';
+
             try {
                 // 首先连接ADB
                 const adbResp = await fetch(`/api/v1/devices/${deviceId}/adb/connect`, { method: 'POST' });
                 const adbResult = await adbResp.json();
-                
+
                 if (!adbResult.ok) {
-                    statusDiv.innerHTML = `<span style="color: #dc3545;">❌ ADB连接失败: ${adbResult.detail}</span>`;
+                    statusDiv.innerHTML = `<span style="color: var(--red);">ADB连接失败: ${adbResult.detail}</span>`;
                     startBtn.disabled = false;
-                    startBtn.innerHTML = '🚀 启动Scrcpy';
+                    startBtn.innerHTML = '启动 Scrcpy';
                     return;
                 }
-                
+
                 // 启动Scrcpy会话
                 const resp = await fetch(`/api/v1/devices/${deviceId}/scrcpy/start`, { method: 'POST' });
                 const result = await resp.json();
-                
+
                 if (result.ok) {
-                    statusDiv.innerHTML = `<span style="color: #28a745;">✅ ${result.message}</span>`;
+                    statusDiv.innerHTML = `<span style="color: var(--green);">${result.message}</span>`;
                     startBtn.style.display = 'none';
                     stopBtn.style.display = 'inline-block';
-                    
+
                     // 开始轮询检查状态
                     startScrcpyStatusPolling(deviceId);
                 } else {
-                    statusDiv.innerHTML = `<span style="color: #dc3545;">❌ ${result.detail}</span>`;
+                    statusDiv.innerHTML = `<span style="color: var(--red);">${result.detail}</span>`;
                     startBtn.disabled = false;
-                    startBtn.innerHTML = '🚀 启动Scrcpy';
+                    startBtn.innerHTML = '启动 Scrcpy';
                 }
             } catch (error) {
-                statusDiv.innerHTML = `<span style="color: #dc3545;">❌ 启动失败: ${error.message}</span>`;
+                    statusDiv.innerHTML = `<span style="color: var(--red);">Scrcpy启动失败: ${error.message || '网络异常'}</span>`;
                 startBtn.disabled = false;
-                startBtn.innerHTML = '🚀 启动Scrcpy';
+                startBtn.innerHTML = '启动 Scrcpy';
             }
         }
-        
+
         async function stopScrcpySession(deviceId) {
             const stopBtn = document.getElementById('stopScrcpyBtn');
             const startBtn = document.getElementById('startScrcpyBtn');
             const statusDiv = document.getElementById('scrcpyStatus');
-            
+
             stopBtn.disabled = true;
-            stopBtn.innerHTML = '⏳ 停止中...';
-            
+            stopBtn.innerHTML = '停止中...';
+
             try {
                 const resp = await fetch(`/api/v1/devices/${deviceId}/scrcpy/stop`, { method: 'POST' });
                 const result = await resp.json();
-                
+
                 if (result.ok) {
-                    statusDiv.innerHTML = `<span style="color: #28a745;">✅ ${result.message}</span>`;
+                    statusDiv.innerHTML = `<span style="color: var(--green);">${result.message}</span>`;
                     stopBtn.style.display = 'none';
                     startBtn.style.display = 'inline-block';
                     startBtn.disabled = false;
-                    startBtn.innerHTML = '🚀 启动Scrcpy';
-                    
+                    startBtn.innerHTML = '启动 Scrcpy';
+
                     // 停止状态轮询
                     stopScrcpyStatusPolling();
                 } else {
-                    statusDiv.innerHTML = `<span style="color: #dc3545;">❌ ${result.detail}</span>`;
+                    statusDiv.innerHTML = `<span style="color: var(--red);">${result.detail}</span>`;
                     stopBtn.disabled = false;
-                    stopBtn.innerHTML = '⏹ 停止Scrcpy';
+                    stopBtn.innerHTML = '停止 Scrcpy';
                 }
             } catch (error) {
-                statusDiv.innerHTML = `<span style="color: #dc3545;">❌ 停止失败: ${error.message}</span>`;
+                    statusDiv.innerHTML = `<span style="color: var(--red);">Scrcpy停止失败: ${error.message || '网络异常'}</span>`;
                 stopBtn.disabled = false;
-                stopBtn.innerHTML = '⏹ 停止Scrcpy';
+                stopBtn.innerHTML = '停止 Scrcpy';
             }
         }
-        
+
         function startScrcpyStatusPolling(deviceId) {
             // 停止现有的轮询
             stopScrcpyStatusPolling();
-            
+
             // 开始新的轮询
             scrcpyCheckInterval = setInterval(async () => {
                 try {
                     const resp = await fetch(`/api/v1/devices/${deviceId}/scrcpy/status`);
                     const result = await resp.json();
-                    
+
                     const statusDiv = document.getElementById('scrcpyStatus');
                     if (result.ok && result.status === 'running') {
-                        statusDiv.innerHTML = `<span style="color: #28a745;">✅ Scrcpy运行中 (PID: ${result.pid})</span>`;
+                        statusDiv.innerHTML = `<span style="color: var(--green);">Scrcpy运行中 (PID: ${result.pid})</span>`;
                     } else if (result.ok && result.status === 'stopped') {
-                        statusDiv.innerHTML = `<span style="color: #ffc107;">⚠️ Scrcpy已停止 (退出码: ${result.exit_code})</span>`;
+                        statusDiv.innerHTML = `<span style="color: var(--orange);">Scrcpy已停止 (退出码: ${result.exit_code})</span>`;
                         stopScrcpyStatusPolling();
-                        
+
                         // 更新按钮状态
                         const stopBtn = document.getElementById('stopScrcpyBtn');
                         const startBtn = document.getElementById('startScrcpyBtn');
                         stopBtn.style.display = 'none';
                         startBtn.style.display = 'inline-block';
                         startBtn.disabled = false;
-                        startBtn.innerHTML = '🚀 启动Scrcpy';
+                        startBtn.innerHTML = '启动 Scrcpy';
                     }
                 } catch (error) {
                     // 忽略轮询错误
                 }
             }, 2000); // 每2秒检查一次
         }
-        
+
         function stopScrcpyStatusPolling() {
             if (scrcpyCheckInterval) {
                 clearInterval(scrcpyCheckInterval);
                 scrcpyCheckInterval = null;
             }
         }
-        
+
         async function getScrcpyCommand(deviceId) {
             try {
                 const resp = await fetch(`/api/v1/devices/${deviceId}/scrcpy/command`);
                 const result = await resp.json();
-                
+
                 if (result.ok) {
                     const command = result.command;
                     const steps = result.steps.join('\n');
-                    
-                    const message = `📋 Scrcpy启动命令:\n\n${command}\n\n📝 使用步骤:\n${steps}\n\n💡 提示: 复制命令到命令行执行即可启动Scrcpy`;
+
+                    const message = `Scrcpy启动命令:\n\n${command}\n\n使用步骤:\n${steps}\n\n提示: 复制命令到命令行执行即可启动Scrcpy`;
                     alert(message);
                 } else {
-                    alert(`❌ 获取命令失败: ${result.detail}`);
+                    alert(`获取Scrcpy命令失败: ${result.detail}`);
                 }
             } catch (error) {
-                alert(`❌ 获取命令失败: ${error.message}`);
+                alert(`获取Scrcpy命令失败: ${error.message || '网络异常'}`);
             }
         }
-        
+
         async function adbConnectDevice(deviceId) {
             const statusDiv = document.getElementById('adbStatus');
             const connectBtn = document.getElementById('adbConnectBtn');
-            
+
             connectBtn.disabled = true;
-            connectBtn.innerHTML = '⏳ 连接中...';
-            
+            connectBtn.innerHTML = '连接中...';
+
             try {
                 const resp = await fetch(`/api/v1/devices/${deviceId}/adb/connect`, { method: 'POST' });
                 const result = await resp.json();
-                
+
                 if (result.ok) {
-                    statusDiv.innerHTML = `<span style="color: #28a745;">✅ ${result.message}</span>`;
-                    connectBtn.innerHTML = '✅ 已连接';
-                    connectBtn.className = 'btn btn-success';
+                    statusDiv.innerHTML = `<span style="color: var(--green);">${result.message}</span>`;
+                    connectBtn.innerHTML = '已连接';
+                    connectBtn.className = 'btn btn-success btn-sm';
                 } else {
-                    statusDiv.innerHTML = `<span style="color: #dc3545;">❌ ${result.detail}</span>`;
-                    connectBtn.innerHTML = '🔌 连接ADB';
+                    statusDiv.innerHTML = `<span style="color: var(--red);">${result.detail}</span>`;
+                    connectBtn.innerHTML = '连接 ADB';
                 }
             } catch (error) {
-                statusDiv.innerHTML = `<span style="color: #dc3545;">❌ 连接失败: ${error.message}</span>`;
-                connectBtn.innerHTML = '🔌 连接ADB';
+                statusDiv.innerHTML = `<span style="color: var(--red);">ADB连接失败: ${error.message || '网络异常'}</span>`;
+                connectBtn.innerHTML = '连接 ADB';
             } finally {
                 connectBtn.disabled = false;
             }
         }
-        
+
         async function adbDisconnectDevice(deviceId) {
             const statusDiv = document.getElementById('adbStatus');
             const disconnectBtn = document.getElementById('adbDisconnectBtn');
-            
+
             disconnectBtn.disabled = true;
-            disconnectBtn.innerHTML = '⏳ 断开中...';
-            
+            disconnectBtn.innerHTML = '断开中...';
+
             try {
                 const resp = await fetch(`/api/v1/devices/${deviceId}/adb/disconnect`, { method: 'POST' });
                 const result = await resp.json();
-                
+
                 if (result.ok) {
-                    statusDiv.innerHTML = `<span style="color: #28a745;">✅ ${result.message}</span>`;
-                    disconnectBtn.innerHTML = '✅ 已断开';
-                    disconnectBtn.className = 'btn btn-secondary';
-                    
+                    statusDiv.innerHTML = `<span style="color: var(--green);">${result.message}</span>`;
+                    disconnectBtn.innerHTML = '已断开';
+                    disconnectBtn.className = 'btn btn-sm';
+                    disconnectBtn.style.background = 'var(--gray-600)';
+
                     // 重置连接按钮
                     const connectBtn = document.getElementById('adbConnectBtn');
-                    connectBtn.innerHTML = '🔌 连接ADB';
-                    connectBtn.className = 'btn btn-primary';
+                    connectBtn.innerHTML = '连接 ADB';
+                    connectBtn.className = 'btn btn-sm';
                 } else {
-                    statusDiv.innerHTML = `<span style="color: #dc3545;">❌ ${result.detail}</span>`;
-                    disconnectBtn.innerHTML = '🔋 断开ADB';
+                    statusDiv.innerHTML = `<span style="color: var(--red);">${result.detail}</span>`;
+                    disconnectBtn.innerHTML = '断开 ADB';
                 }
             } catch (error) {
-                statusDiv.innerHTML = `<span style="color: #dc3545;">❌ 断开失败: ${error.message}</span>`;
-                disconnectBtn.innerHTML = '🔋 断开ADB';
+                statusDiv.innerHTML = `<span style="color: var(--red);">ADB断开失败: ${error.message || '网络异常'}</span>`;
+                disconnectBtn.innerHTML = '断开 ADB';
             } finally {
                 disconnectBtn.disabled = false;
             }
         }
-        
+
         function showScrcpyHelp() {
-            const helpText = `📖 Scrcpy使用帮助：
+            const helpText = `Scrcpy使用帮助：
 
-🔧 什么是Scrcpy？
+什么是Scrcpy？
 Scrcpy是一个开源的Android屏幕镜像工具，可以通过ADB无线调试实现：
-• 实时屏幕镜像（低延迟）
-• 鼠标点击控制
-• 键盘输入支持
-• 文件传输功能
+- 实时屏幕镜像（低延迟）
+- 鼠标点击控制
+- 键盘输入支持
+- 文件传输功能
 
-🚀 安装步骤：
+安装步骤：
 1. 下载Scrcpy: https://github.com/Genymobile/scrcpy/releases
 2. 解压到任意目录（如 C:\\scrcpy）
 3. 确保ADB已安装（通常包含在Scrcpy包中）
 
-📱 电视端设置：
-1. 进入电视设置 → 关于本机
+电视端设置：
+1. 进入电视设置 > 关于本机
 2. 连续点击"版本号"7次开启开发者模式
-3. 返回设置 → 开发者选项
+3. 返回设置 > 开发者选项
 4. 开启"USB调试"和"无线调试"
 
-🔗 连接步骤：
+连接步骤：
 1. 在管理后台点击"检查Scrcpy"
 2. 点击"连接ADB"建立连接
 3. 点击"启动Scrcpy"开始控制
 
-💡 高级功能：
-• 支持横屏/竖屏切换
-• 支持屏幕录制
-• 支持音频传输（需要Android 11+）
-• 支持多设备同时控制
+注意事项：
+- 确保电视和电脑在同一网络
+- 首次连接需要在电视上授权
+- 部分功能需要电视重启后生效`;
 
-⚠️ 注意事项：
-• 确保电视和电脑在同一网络
-• 首次连接需要在电视上授权
-• 部分功能需要电视重启后生效`;
-            
             alert(helpText);
         }
-        
-        // 修改closeScreenshotModal函数，停止Scrcpy状态轮询
-        function closeScreenshotModal() {
-            // 停止Scrcpy状态轮询
-            stopScrcpyStatusPolling();
-            
-            // 停止实时屏幕流
-            stopScreenStream();
-            
-            document.getElementById('screenshotModal').style.display = 'none';
-            currentRemoteDeviceId = null;
-        }
 
+        // 修改closeScreenshotModal函数，停止Scrcpy状态轮询
         // Init
         loadData();
         setInterval(loadData, 5000);
+
+        // 连通性检测（ping + ADB），30秒一次
+        let _connCheckRunning = false;
+        async function checkConnectivity() {
+            if (_connCheckRunning) return; // 防止并发
+            _connCheckRunning = true;
+            try {
+                const resp = await fetch('/api/v1/devices/connectivity-check');
+                if (!resp.ok) {
+                    console.error('Connectivity check HTTP error:', resp.status);
+                    return;
+                }
+                const data = await resp.json();
+                if (data && typeof data === 'object' && !data.detail) {
+                    connectivityData = data;
+                    renderDevices();
+                } else {
+                    console.warn('Connectivity check returned unexpected data:', data);
+                }
+            } catch(e) {
+                console.error('Connectivity check error:', e);
+            } finally {
+                _connCheckRunning = false;
+            }
+        }
+        setInterval(checkConnectivity, 30000);
     </script>
 </body>
 </html>

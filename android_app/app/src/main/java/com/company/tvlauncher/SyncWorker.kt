@@ -19,21 +19,28 @@ class SyncWorker(
             val networkInfo = networkProvider.collect()
             val api = RemoteApi(applicationContext, policyStore)
 
-            // Try to register if not already
-            api.registerIfNeeded("MeetingTV", networkInfo)
+            // 如果没有token，说明尚未注册或已被注销，需要重新注册
+            val hasToken = policyStore.getDeviceToken() != null
+            if (!hasToken) {
+                val registered = api.registerIfNeeded("MeetingTV", networkInfo)
+                if (!registered) {
+                    Log.w("SyncWorker", "注册失败，将在下次重试")
+                    return@withContext Result.retry()
+                }
+            }
 
-            // Send heartbeat and get policy
+            // 发送心跳
             val success = api.heartbeat(networkInfo)
-            
+
             if (success) {
                 val policy = policyStore.getPolicy()
                 Log.d("SyncWorker", "Policy synced: ${policy.mode}")
-                // Note: We don't execute the policy here directly to avoid 
-                // interrupting the user if they are using the TV. 
-                // Execution is usually triggered on boot or main app resume.
                 Result.success()
             } else {
-                Log.w("SyncWorker", "Heartbeat failed, will retry.")
+                // 心跳失败：可能是服务器不可达，也可能是token失效（设备被移除）
+                // 清除token，下次SyncWorker运行时会重新注册
+                Log.w("SyncWorker", "心跳失败，清除token等待重新注册")
+                policyStore.clearDeviceToken()
                 Result.retry()
             }
         } catch (e: Exception) {

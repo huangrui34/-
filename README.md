@@ -49,33 +49,29 @@
 │   └── requirements.txt
 │
 └── 启动脚本/
-    ├── 启动后台服务.bat      # Windows启动脚本
-    └── start_server.ps1   # PowerShell启动脚本
+    └── start_server.bat     # Windows一键启动脚本
 ```
 
 ## 快速开始
 
-### 1. 启动后端服务
+### 1. 启动后端服务（Windows）
+
+双击 `backend_server/start_server.bat`，首次运行会自动：
+- 检测合适的Python版本（3.9-3.13）
+- 创建虚拟环境
+- 使用国内镜像源安装依赖
+- 清理端口并启动服务
+- 自动打开浏览器访问管理后台
+
+### 2. 手动启动（Linux/macOS）
 
 ```bash
 cd backend_server
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
-
-或者使用Windows批处理文件：
-```bash
-启动后台服务.bat
-```
-
-### 2. 构建Android应用
-
-```bash
-cd android_app
-./gradlew assembleDebug
-```
-
-生成的APK文件：`android_app/app/build/outputs/apk/debug/app-debug.apk`
 
 ### 3. 访问管理后台
 
@@ -92,8 +88,8 @@ cd android_app
 
 ### 环境要求
 - **Android TV**: Android 6.0+ (API 23+)
-- **Python**: 3.8+
-- **ADB**: Android Debug Bridge
+- **Python**: 3.9-3.13（3.14+不支持pydantic预编译包）
+- **ADB**: Android Debug Bridge（可选，用于远程部署和控制）
 - **网络**: 电视和服务器在同一局域网
 
 ### 端口配置
@@ -102,8 +98,8 @@ cd android_app
 - **WebSocket**: 8000 (实时屏幕流)
 
 ### 数据库
-- 使用SQLite数据库，自动创建于`backend_server/app.db`
-- 包含设备、策略、心跳和操作日志表
+- 使用SQLite数据库，自动创建于`backend_server/tv_launcher.db`
+- 首次启动自动创建表结构，无需手动初始化
 
 ## 使用指南
 
@@ -272,7 +268,8 @@ POST /api/v1/devices/{device_id}/adb/disconnect
 运行综合测试：
 ```bash
 cd backend_server
-python test_scenarios.py
+source venv/bin/activate  # Windows: venv\Scripts\activate
+python -c "from app.main import app; print('Backend OK')"
 ```
 
 ## 许可证

@@ -10,6 +10,20 @@ class LauncherExecutor(private val context: Context) {
     companion object {
         private const val TAG = "LauncherExecutor"
         const val HDMI_TV_PLAYER_PACKAGE = "com.xiaomi.mitv.tvplayer"
+
+        // 追踪最近一次启动目标APP的时间，防止保活服务反复重启
+        private var lastLaunchTimeMs: Long = 0
+        private const val LAUNCH_COOLDOWN_MS = 15_000L // 启动后15秒内不再重复启动
+
+        /** 记录启动时间 */
+        fun recordLaunchTime() {
+            lastLaunchTimeMs = System.currentTimeMillis()
+        }
+
+        /** 是否在启动冷却期 */
+        fun isInLaunchCooldown(): Boolean {
+            return System.currentTimeMillis() - lastLaunchTimeMs < LAUNCH_COOLDOWN_MS
+        }
     }
 
     fun execute(policy: LaunchPolicy) {
@@ -87,6 +101,7 @@ class LauncherExecutor(private val context: Context) {
      */
     fun launchApp(packageName: String) {
         android.util.Log.d(TAG, "启动APP: $packageName")
+        recordLaunchTime()
 
         // 尝试多种启动方法
         val methods = listOf(
@@ -114,6 +129,7 @@ class LauncherExecutor(private val context: Context) {
      */
     fun forceStopAndRestart(packageName: String) {
         android.util.Log.d(TAG, "强制停止并重启APP: $packageName")
+        recordLaunchTime()
 
         try {
             // 1. 先强制停止APP
@@ -134,9 +150,38 @@ class LauncherExecutor(private val context: Context) {
 
     /**
      * 检测指定APP是否在运行
+     *
+     * 在SELinux Enforcing + MIUI的Android TV上，跨进程检测全部被阻止：
+     * - pidof: 无权限
+     * - /proc/[pid]/cmdline: Permission denied
+     * - getRunningTasks: 被MIUI BLOCK-MONITOR阻止
+     * - runningAppProcesses: 只返回自己
+     *
+     * 可靠的检测策略：
+     * 1. 如果Launcher自己在前台 → 目标APP不在运行（需要启动）
+     * 2. 如果Launcher在后台 → 目标APP很可能在前台运行（不需要重启）
+     * 3. 启动冷却期：刚启动过的APP不做重复检测
      */
     fun isAppRunning(packageName: String): Boolean {
         android.util.Log.d(TAG, "检查进程是否运行: $packageName")
+
+        // 启动冷却期：刚启动过的APP不做重复检测，避免启动→检测→重启的死循环
+        if (isInLaunchCooldown()) {
+            val remaining = (LAUNCH_COOLDOWN_MS - (System.currentTimeMillis() - lastLaunchTimeMs)) / 1000
+            android.util.Log.d(TAG, "启动冷却期中(剩余${remaining}秒)，判定为运行中: $packageName")
+            return true
+        }
+
+        // 核心判断：检查Launcher自身是否在前台
+        // 作为HOME应用，如果Launcher在前台，说明目标APP没有运行
+        // 如果Launcher在后台，说明有其他应用（目标APP）在前台
+        val isLauncherForeground = isLauncherInForeground()
+        if (!isLauncherForeground) {
+            android.util.Log.d(TAG, "Launcher在后台，目标APP大概率在运行: $packageName")
+            return true
+        }
+
+        // Launcher在前台，尝试其他检测方式作为补充
         try {
             // 方法1：通过pidof命令检查
             try {
@@ -177,22 +222,36 @@ class LauncherExecutor(private val context: Context) {
                 android.util.Log.d(TAG, "/proc检查失败: ${e.message}")
             }
 
-            // 方法3：检查运行中的进程
-            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-            val processes = am.runningAppProcesses
-            if (processes != null) {
-                for (process in processes) {
-                    if (process.processName == packageName || process.processName.contains(packageName)) {
-                        android.util.Log.d(TAG, "找到运行中的进程: ${process.processName}")
-                        return true
+            // 方法3：检查运行中的进程（Android 9+可能只返回自己）
+            try {
+                val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                val processes = am.runningAppProcesses
+                if (processes != null) {
+                    for (process in processes) {
+                        if (process.processName == packageName || process.processName.contains(packageName)) {
+                            android.util.Log.d(TAG, "找到运行中的进程: ${process.processName}")
+                            return true
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                android.util.Log.d(TAG, "runningAppProcesses检查失败: ${e.message}")
             }
         } catch (e: Exception) {
             android.util.Log.e(TAG, "检查进程异常: ${e.message}")
         }
-        android.util.Log.d(TAG, "未找到进程: $packageName")
+
+        android.util.Log.d(TAG, "Launcher在前台且目标APP未被检测到，判定未运行: $packageName")
         return false
+    }
+
+    /**
+     * 检查Launcher自身是否在前台
+     * 通过SharedPreferences中保存的前台状态判断（由MainActivity的onResume/onPause更新）
+     */
+    private fun isLauncherInForeground(): Boolean {
+        val prefs = context.getSharedPreferences("tv_policy", Context.MODE_PRIVATE)
+        return prefs.getBoolean("launcher_foreground", true)
     }
 
     /**

@@ -11,8 +11,28 @@ data class LaunchPolicy(
 class PolicyStore(private val context: Context) {
     private val prefs = context.getSharedPreferences("tv_policy", Context.MODE_PRIVATE)
 
-    fun getServerBaseUrl(): String =
-        prefs.getString("server_base_url", "http://localhost:8000") ?: "http://localhost:8000"
+    fun getServerBaseUrl(): String {
+        // 优先使用SharedPreferences中的URL
+        val saved = prefs.getString("server_base_url", null)
+        if (!saved.isNullOrBlank() && saved != "http://localhost:8000") {
+            return saved!!
+        }
+        // 如果没有保存的URL，尝试从全局Settings中读取（由deploy-tv设置）
+        try {
+            val globalUrl = android.provider.Settings.Global.getString(
+                context.contentResolver,
+                "tv_launcher_server_url"
+            )
+            if (!globalUrl.isNullOrBlank()) {
+                // 保存到SharedPreferences，以后不再读取全局设置
+                prefs.edit().putString("server_base_url", globalUrl.trimEnd('/')).apply()
+                return globalUrl.trimEnd('/')
+            }
+        } catch (e: Exception) {
+            // 忽略
+        }
+        return "http://localhost:8000"
+    }
 
     fun setServerBaseUrl(url: String) {
         prefs.edit().putString("server_base_url", url.trimEnd('/')).apply()

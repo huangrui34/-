@@ -33,6 +33,7 @@ class DeviceHeartbeatIn(BaseModel):
     wifi_mac: Optional[str] = None
     eth_mac: Optional[str] = None
     network_ssid: Optional[str] = None
+    network_type: Optional[str] = None  # "wifi" | "ethernet" | "none"
     installed_apps: Optional[str] = None
     ram_usage: Optional[str] = None # New field
     storage_usage: Optional[str] = None # New field
@@ -45,11 +46,13 @@ class DeviceOut(BaseModel):
     device_name: str
     room_name: Optional[str] # New field
     model_name: Optional[str]
+    android_version: Optional[str] = None
     wifi_ip: Optional[str]
     eth_ip: Optional[str]
     wifi_mac: Optional[str]
     eth_mac: Optional[str]
     network_ssid: Optional[str]
+    network_type: Optional[str] = None  # "wifi" | "ethernet" | "none"
     installed_apps: Optional[str]
     ram_usage: Optional[str] # New field
     storage_usage: Optional[str] # New field

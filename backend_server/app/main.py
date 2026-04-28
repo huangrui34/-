@@ -1,15 +1,18 @@
 import secrets
 import os
+import socket
 import subprocess
 import time
 import asyncio
 import base64
 import json
+from datetime import datetime, timedelta, timezone
 from fastapi import Depends, FastAPI, Header, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import and_
 
 from .db import Base, engine, get_db
 from .models import Device, DeviceHeartbeat, Policy, OperationLog
@@ -17,10 +20,46 @@ from .schemas import DeviceHeartbeatIn, DeviceOut, DeviceRegister, PolicyCreate,
 
 Base.metadata.create_all(bind=engine)
 
+# 自动迁移：为旧数据库添加缺失的列
+def _migrate_db():
+    with engine.connect() as conn:
+        # 检查并添加 network_type 列
+        from sqlalchemy import inspect as sa_inspect
+        insp = sa_inspect(engine)
+        existing_cols = [c['name'] for c in insp.get_columns('devices')]
+        if 'network_type' not in existing_cols:
+            conn.execute(Device.__table__.c.network_type.add())
+            conn.commit()
+            print("[migration] Added column: devices.network_type")
+
+_migrate_db()
+
 def log_operation(db: Session, action: str, detail: str = None, device_id: int = None, device_name: str = None, operator: str = "admin"):
     log = OperationLog(action=action, detail=detail, device_id=device_id, device_name=device_name, operator=operator)
     db.add(log)
     db.commit()
+
+def detect_server_url(tv_ip: str) -> str:
+    """自动检测本机在TV同一子网上的IP地址，返回服务器URL"""
+    try:
+        # 获取本机所有IP地址
+        hostname = socket.gethostname()
+        local_ips = socket.gethostbyname_ex(hostname)[2]
+        # 过滤掉127.x.x.x
+        local_ips = [ip for ip in local_ips if not ip.startswith("127.")]
+
+        # 找到与TV同一子网的IP
+        tv_prefix = ".".join(tv_ip.split(".")[:3])
+        for ip in local_ips:
+            if ip.startswith(tv_prefix + "."):
+                return f"http://{ip}:8000"
+
+        # 如果没有同子网的IP，使用第一个非localhost的IP
+        if local_ips:
+            return f"http://{local_ips[0]}:8000"
+    except Exception:
+        pass
+    return "http://localhost:8000"
 
 def resolve_adb_path() -> str:
     env = os.environ.get("ADB_PATH")
@@ -44,18 +83,51 @@ def resolve_adb_path() -> str:
 
 app = FastAPI(title="Mi TV Launcher Backend", version="0.1.0")
 
+# 项目根目录（backend_server/），基于本文件位置计算，不依赖CWD
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 @app.on_event("startup")
 def list_routes():
     for route in app.routes:
         methods = getattr(route, "methods", ["MOUNT"])
         print(f"Route: {route.path} [ {','.join(methods)} ]")
 
+# ========== 心跳超时离线检测 ==========
+OFFLINE_TIMEOUT_MINUTES = 30  # 超过30分钟无心跳则标记离线
+OFFLINE_CHECK_INTERVAL = 60   # 每60秒检查一次
+
+async def check_offline_devices():
+    """后台定时任务：将超时无心跳的在线设备标记为离线"""
+    while True:
+        await asyncio.sleep(OFFLINE_CHECK_INTERVAL)
+        try:
+            from .db import SessionLocal
+            db = SessionLocal()
+            timeout = datetime.now(timezone.utc) - timedelta(minutes=OFFLINE_TIMEOUT_MINUTES)
+            stale_devices = db.query(Device).filter(
+                and_(Device.online == True, Device.updated_at < timeout)
+            ).all()
+            for d in stale_devices:
+                d.online = False
+                print(f"[离线检测] {d.device_name} 超过{OFFLINE_TIMEOUT_MINUTES}分钟无心跳，标记为离线")
+            if stale_devices:
+                db.commit()
+            db.close()
+        except Exception as e:
+            print(f"[离线检测] 错误: {e}")
+
+@app.on_event("startup")
+async def start_offline_checker():
+    asyncio.create_task(check_offline_devices())
+    print(f"[离线检测] 已启动，超时={OFFLINE_TIMEOUT_MINUTES}分钟，检查间隔={OFFLINE_CHECK_INTERVAL}秒")
+
 # Ensure directories exist
 for path in ["static/ota", "static/screenshots", "static/uploads", "app/templates"]:
-    if not os.path.exists(path):
-        os.makedirs(path)
+    full_path = os.path.join(BASE_DIR, path)
+    if not os.path.exists(full_path):
+        os.makedirs(full_path)
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
 app.add_middleware(
     CORSMiddleware,
@@ -86,7 +158,9 @@ def register_device(payload: DeviceRegister, db: Session = Depends(get_db)):
     existing = db.query(Device).filter(Device.device_sn == payload.device_sn).first()
     if existing:
         for key, value in payload.model_dump().items():
-            setattr(existing, key, value)
+            # 只更新非None的字段，避免APP不上报的字段（如room_name）覆盖已有值
+            if value is not None:
+                setattr(existing, key, value)
         db.commit()
         return {"token": existing.token, "device_id": existing.id}
     token = secrets.token_hex(24)
@@ -99,7 +173,7 @@ def register_device(payload: DeviceRegister, db: Session = Depends(get_db)):
 def auth_device(token: str, db: Session) -> Device:
     device = db.query(Device).options(joinedload(Device.policy)).filter(Device.token == token).first()
     if not device:
-        raise HTTPException(status_code=401, detail="Invalid device token")
+        raise HTTPException(status_code=401, detail="设备令牌无效")
     return device
 
 @app.post("/api/v1/devices/heartbeat")
@@ -112,9 +186,30 @@ def device_heartbeat(
     update_data = payload.model_dump(exclude={"status", "message"}, exclude_unset=True)
     for key, value in update_data.items():
         if value is not None:
+            # 清洗无效 SSID 值（小米电视通过有线连接时可能返回 "0x" 等垃圾值）
+            if key == "network_ssid" and value in ("0x", "0x0", "<unknown ssid>"):
+                value = "未连接"
+            # 当活动网络为有线时，清洗WiFi SSID中的垃圾值
+            if key == "network_ssid" and update_data.get("network_type") == "ethernet" and value not in ("未连接", None):
+                # WiFi可能仍然连接着（小米电视特性），但SSID不应作为主要显示
+                pass  # 保留SSID，前端会优先显示network_type
             setattr(device, key, value)
     
     device.online = True
+    # Fetch android_version if not yet known
+    if not device.android_version:
+        ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
+        if ip and ip != "0.0.0.0":
+            try:
+                adb_path = resolve_adb_path()
+                subprocess.run([adb_path, "connect", f"{ip}:5555"], timeout=3, capture_output=True)
+                result = subprocess.run([adb_path, "-s", f"{ip}:5555", "shell", "getprop", "ro.build.version.release"],
+                                       capture_output=True, text=True, timeout=5)
+                version = result.stdout.strip()
+                if version:
+                    device.android_version = version
+            except Exception:
+                pass
     db.add(DeviceHeartbeat(device_id=device.id, status=payload.status, message=payload.message))
     db.commit()
     db.refresh(device)
@@ -160,7 +255,7 @@ def pause_policy(device_id: int, db: Session = Depends(get_db)):
     """暂停设备的策略执行"""
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=404, detail="设备未找到")
     device.policy_paused = True
     db.commit()
     log_operation(db, "pause_policy", f"设备 {device.device_name} 的策略已暂停", device_id, device.device_name)
@@ -173,7 +268,7 @@ def resume_policy(device_id: int, db: Session = Depends(get_db)):
     """恢复设备的策略执行"""
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=404, detail="设备未找到")
     device.policy_paused = False
     db.commit()
     log_operation(db, "resume_policy", f"设备 {device.device_name} 的策略已恢复", device_id, device.device_name)
@@ -194,7 +289,7 @@ def device_status(ip: str, db: Session = Depends(get_db)):
         .first()
     )
     if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=404, detail="设备未找到")
     return {
         "ip": ip,
         "device_type": "电视机",
@@ -213,37 +308,38 @@ def device_status(ip: str, db: Session = Depends(get_db)):
     }
 
 @app.post("/api/v1/deploy-tv")
-def remote_deploy(ip: str, db: Session = Depends(get_db)):
+def remote_deploy(ip: str, server_url: str = None, db: Session = Depends(get_db)):
     """
-    Connect to a remote TV via IP, install the launcher APK, and set the server URL.
+    Connect to a remote TV via IP, install the launcher APK, configure server URL, and register.
     """
     adb_path = resolve_adb_path()
-    
+
+    # Auto-detect server URL if not provided
+    if not server_url:
+        server_url = detect_server_url(ip)
+
     # Try multiple possible APK locations
     possible_apk_paths = [
-        "../android_app/app/build/outputs/apk/debug/app-debug.apk",
-        "../../android_app/app/build/outputs/apk/debug/app-debug.apk",
-        "../../backend/static/ota/app-debug.apk",
-        "static/ota/app-debug.apk"
+        os.path.join(BASE_DIR, "..", "android_app", "app", "build", "outputs", "apk", "debug", "app-debug.apk"),
+        os.path.join(BASE_DIR, "static", "ota", "app-debug.apk"),
     ]
-    
+
     apk_path = None
     for p in possible_apk_paths:
         if os.path.exists(p):
             apk_path = p
             break
-    
+
     if not apk_path:
         return {"ok": False, "detail": "未找到安装包 (app-debug.apk)，请确保项目已编译。"}
 
     try:
         log_operation(db, "deploy_start", f"开始向 {ip} 部署应用")
-        
+
         # 1. Connect via ADB
-        # Force disconnect first to clean up any stale connections
         subprocess.run([adb_path, "disconnect", ip], timeout=5)
-        conn_res = subprocess.run([adb_path, "connect", ip], capture_output=True, text=True, timeout=15)
-        
+        conn_res = subprocess.run([adb_path, "connect", f"{ip}:5555"], capture_output=True, text=True, timeout=15)
+
         if "connected to" not in conn_res.stdout:
             return {"ok": False, "detail": f"ADB 连接失败: {conn_res.stdout.strip()}"}
 
@@ -252,21 +348,48 @@ def remote_deploy(ip: str, db: Session = Depends(get_db)):
         if "unauthorized" in auth_check.stderr or "unauthorized" in auth_check.stdout:
             return {"ok": False, "detail": "连接成功但未授权。请在电视屏幕上点击'始终允许'并确认授权。"}
 
-        # 2. Install APK
+        # 2. Clear app data (remove stale token/config from previous registration)
+        subprocess.run([adb_path, "-s", f"{ip}:5555", "shell", "pm", "clear", "com.company.tvlauncher"], timeout=10, capture_output=True)
+
+        # 3. Install APK (clean install after clearing data)
         install_res = subprocess.run([adb_path, "-s", f"{ip}:5555", "install", "-r", apk_path], capture_output=True, text=True, timeout=120)
         if install_res.returncode != 0:
             return {"ok": False, "detail": f"安装失败: {install_res.stderr or install_res.stdout}"}
 
-        # 3. Start the app
+        # 4. Force-stop app before writing config
+        subprocess.run([adb_path, "-s", f"{ip}:5555", "shell", "am", "force-stop", "com.company.tvlauncher"], timeout=5)
+        time.sleep(1)
+
+        # 5. Configure server URL via global settings (survives pm clear, readable by app)
+        # The app's PolicyStore.getServerBaseUrl() reads this on first launch
+        subprocess.run([adb_path, "-s", f"{ip}:5555", "shell",
+                       "settings", "put", "global", "tv_launcher_server_url", server_url], timeout=10)
+        log_operation(db, "configure_server_url", f"已配置服务器地址: {server_url}", None, ip)
+
+        # 6. Start the app (it will self-register with correct device_sn and token)
         subprocess.run([adb_path, "-s", f"{ip}:5555", "shell", "am", "start", "-n", "com.company.tvlauncher/.MainActivity"], timeout=15)
-        
-        # 4. Create default policy if none exists
+
+        # 6. Wait for app to register and send heartbeat
+        log_operation(db, "wait_registration", f"等待APP自注册...")
+        time.sleep(10)
+
+        # 7. Find the device by IP in the database (app self-registered with correct device_sn)
+        device = db.query(Device).filter(
+            (Device.eth_ip == ip) | (Device.wifi_ip == ip)
+        ).first()
+
+        if not device:
+            # App may not have registered yet; return partial success
+            log_operation(db, "deploy_partial", f"APP已安装但未检测到自注册，请检查网络连接和服务器地址: {server_url}", None, ip)
+            return {"ok": True, "message": f"部署成功，但未检测到设备注册。请确认电视能访问服务器 {server_url}，设备将自动注册。", "server_url": server_url}
+
+        # 8. Create default policy if none exists and bind it
         existing_policy = db.query(Policy).first()
         if not existing_policy:
             default_policy = Policy(
                 name="默认策略",
                 mode="app",
-                target_app_package="com.android.settings",  # Default to Settings app
+                target_app_package="com.android.settings",
                 target_hdmi_port=1,
                 fallback_mode="app",
                 fallback_value="com.android.settings",
@@ -274,79 +397,24 @@ def remote_deploy(ip: str, db: Session = Depends(get_db)):
             )
             db.add(default_policy)
             db.commit()
+            db.refresh(default_policy)
             log_operation(db, "create_default_policy", "创建了默认策略")
-        
-        # 5. Get device info and register it
-        try:
-            # Get device serial number
-            serial_res = subprocess.run([adb_path, "-s", f"{ip}:5555", "shell", "getprop", "ro.serialno"], 
-                                       capture_output=True, text=True, timeout=10)
-            device_sn = serial_res.stdout.strip() if serial_res.returncode == 0 else f"unknown_{ip}"
-            
-            # Get model name
-            model_res = subprocess.run([adb_path, "-s", f"{ip}:5555", "shell", "getprop", "ro.product.model"], 
-                                      capture_output=True, text=True, timeout=10)
-            model_name = model_res.stdout.strip() if model_res.returncode == 0 else "Unknown"
-            
-            # Get MAC addresses
-            wifi_mac_res = subprocess.run([adb_path, "-s", f"{ip}:5555", "shell", "cat", "/sys/class/net/wlan0/address"], 
-                                         capture_output=True, text=True, timeout=10)
-            wifi_mac = wifi_mac_res.stdout.strip() if wifi_mac_res.returncode == 0 else "00:00:00:00:00:00"
-            
-            eth_mac_res = subprocess.run([adb_path, "-s", f"{ip}:5555", "shell", "cat", "/sys/class/net/eth0/address"], 
-                                        capture_output=True, text=True, timeout=10)
-            eth_mac = eth_mac_res.stdout.strip() if eth_mac_res.returncode == 0 else "00:00:00:00:00:00"
-            
-            # Register device
-            device_name = f"TV-{eth_mac[-6:].replace(':', '')}" if eth_mac != "00:00:00:00:00:00" else f"TV-{ip.replace('.', '')}"
-            
-            # Check if device already exists
-            existing_device = db.query(Device).filter(Device.device_sn == device_sn).first()
-            if existing_device:
-                # Update existing device
-                existing_device.device_name = device_name
-                existing_device.model_name = model_name
-                existing_device.eth_ip = ip
-                existing_device.wifi_mac = wifi_mac
-                existing_device.eth_mac = eth_mac
-                existing_device.online = True
-                db.commit()
-                device_id = existing_device.id
-                log_operation(db, "update_device", f"更新设备信息: {device_name}", device_id, device_name)
-            else:
-                # Create new device
-                token = secrets.token_hex(24)
-                device = Device(
-                    device_sn=device_sn,
-                    device_name=device_name,
-                    model_name=model_name,
-                    eth_ip=ip,
-                    wifi_mac=wifi_mac,
-                    eth_mac=eth_mac,
-                    online=True,
-                    token=token
-                )
-                db.add(device)
-                db.commit()
-                db.refresh(device)
-                device_id = device.id
-                log_operation(db, "register_device", f"注册新设备: {device_name}", device_id, device_name)
-            
-            # 6. Bind default policy to device
+
+        if device.policy_id is None:
             default_policy = db.query(Policy).filter(Policy.name == "默认策略").first()
             if default_policy:
-                device = db.query(Device).filter(Device.id == device_id).first()
-                if device:
-                    device.policy_id = default_policy.id
-                    db.commit()
-                    log_operation(db, "bind_default_policy", f"设备 {device_name} 绑定了默认策略", device_id, device_name)
-        
-        except Exception as device_err:
-            # Continue even if device registration fails
-            log_operation(db, "device_info_error", f"获取设备信息时出错: {str(device_err)}")
-        
-        log_operation(db, "deploy_success", f"已成功向 {ip} 远程部署 Launcher", None, ip)
-        return {"ok": True, "message": f"部署成功，电视应已自动上线并绑定了默认策略"}
+                device.policy_id = default_policy.id
+                db.commit()
+                log_operation(db, "bind_default_policy", f"设备 {device.device_name} 绑定了默认策略", device.id, device.device_name)
+
+        log_operation(db, "deploy_success", f"已成功向 {ip} 远程部署 Launcher", device.id, device.device_name)
+        return {
+            "ok": True,
+            "message": f"部署成功，设备 {device.device_name} 已自动注册并绑定策略",
+            "device_id": device.id,
+            "device_name": device.device_name,
+            "server_url": server_url
+        }
     except Exception as e:
         log_operation(db, "deploy_error", f"向 {ip} 部署时出错: {str(e)}")
         return {"ok": False, "detail": str(e)}
@@ -356,7 +424,7 @@ def bind_policy(device_id: int, policy_id: int, db: Session = Depends(get_db)):
     device = db.query(Device).filter(Device.id == device_id).first()
     policy = db.query(Policy).filter(Policy.id == policy_id).first()
     if not device or not policy:
-        raise HTTPException(status_code=404, detail="Device or policy not found")
+        raise HTTPException(status_code=404, detail="设备或策略未找到")
     device.policy_id = policy.id
     db.commit()
     log_operation(db, "bind_policy", f"设备 {device.device_name} 绑定了策略 {policy.name}", device_id, device.device_name)
@@ -388,7 +456,7 @@ def bind_policy(device_id: int, policy_id: int, db: Session = Depends(get_db)):
 def update_room(device_id: int, room_name: str, db: Session = Depends(get_db)):
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=404, detail="设备未找到")
     old_room = device.room_name
     device.room_name = room_name
     db.commit()
@@ -399,14 +467,14 @@ def update_room(device_id: int, room_name: str, db: Session = Depends(get_db)):
 def get_screenshot(device_id: int, db: Session = Depends(get_db)):
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=404, detail="设备未找到")
     
     ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
     if not ip or ip == "0.0.0.0":
-        raise HTTPException(status_code=400, detail="Device has no valid IP for ADB")
+        raise HTTPException(status_code=400, detail="设备没有可用于ADB连接的IP地址")
 
     adb_path = resolve_adb_path()
-    local_path = f"static/screenshots/device_{device_id}.png"
+    local_path = os.path.join(BASE_DIR, f"static/screenshots/device_{device_id}.png")
     
     try:
         subprocess.run([adb_path, "connect", ip], timeout=5)
@@ -441,17 +509,17 @@ def get_scrcpy_path():
     
     # 检查项目目录中的scrcpy
     project_scrcpy_paths = [
-        os.path.join(os.path.dirname(__file__), "..", "scrcpy", "scrcpy.exe"),  # Windows
-        os.path.join(os.path.dirname(__file__), "..", "scrcpy", "scrcpy"),      # Linux/macOS
+        os.path.join(BASE_DIR, "scrcpy", "scrcpy.exe"),  # Windows
+        os.path.join(BASE_DIR, "scrcpy", "scrcpy"),      # Linux/macOS
     ]
-    
+
     for path in project_scrcpy_paths:
         if os.path.exists(path):
             return path
-    
+
     # 如果未找到，尝试自动安装
     print("Scrcpy未找到，尝试自动安装...")
-    install_script = os.path.join(os.path.dirname(__file__), "..", "install_scrcpy.py")
+    install_script = os.path.join(BASE_DIR, "install_scrcpy.py")
     
     if os.path.exists(install_script):
         try:
@@ -555,7 +623,7 @@ async def check_scrcpy_installation():
     scrcpy_path = get_scrcpy_path()
     if scrcpy_path:
         return {
-            "ok": True, 
+            "ok": True,
             "installed": True,
             "path": scrcpy_path,
             "message": "Scrcpy已安装"
@@ -567,16 +635,124 @@ async def check_scrcpy_installation():
             "message": "Scrcpy未安装，请先安装Scrcpy"
         }
 
+@app.post("/api/v1/scrcpy/auto-install")
+async def auto_install_scrcpy():
+    """自动下载安装Scrcpy"""
+    import sys as _sys
+    install_script = os.path.join(BASE_DIR, "install_scrcpy.py")
+    if not os.path.exists(install_script):
+        return {"ok": False, "detail": "Scrcpy安装脚本未找到"}
+    try:
+        result = subprocess.run(
+            [_sys.executable, install_script],
+            capture_output=True, text=True, timeout=300
+        )
+        if result.returncode == 0:
+            # Check again
+            path = get_scrcpy_path()
+            if path:
+                return {"ok": True, "path": path, "message": "Scrcpy安装成功"}
+            else:
+                return {"ok": False, "detail": "安装完成但未找到可执行文件"}
+        else:
+            return {"ok": False, "detail": result.stderr[-500:] if result.stderr else "安装失败"}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "detail": "安装超时（5分钟）"}
+    except Exception as e:
+        return {"ok": False, "detail": str(e)}
+
+@app.get("/api/v1/scrcpy/download-script")
+async def download_scrcpy_setup_script():
+    """生成其他电脑的一键安装Scrcpy脚本（.bat）"""
+    script = '''@echo off
+chcp 65001 >nul 2>&1
+title Install Scrcpy + ADB
+echo ========================================
+echo   Scrcpy + ADB Auto Installer
+echo ========================================
+echo.
+
+:: 1. Create folder
+set "INSTALL_DIR=%USERPROFILE%\\scrcpy"
+if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
+cd /d "%INSTALL_DIR%"
+
+:: 2. Download ADB
+echo [1/3] Downloading ADB...
+if not exist "adb.exe" (
+    curl -L -o platform-tools.zip "https://dl.google.com/android/repository/platform-tools-latest-windows.zip" --timeout 60
+    if errorlevel 1 (
+        echo [ERROR] Failed to download ADB
+        pause
+        exit /b 1
+    )
+    powershell -command "Expand-Archive -Path platform-tools.zip -DestinationPath . -Force"
+    copy platform-tools\\adb.exe . >nul
+    copy platform-tools\\AdbWinApi.dll . >nul
+    copy platform-tools\\AdbWinUsbApi.dll . >nul
+    del platform-tools.zip
+    rmdir /s /q platform-tools
+    echo   ADB OK
+) else (
+    echo   ADB already exists
+)
+
+:: 3. Download Scrcpy
+echo [2/3] Downloading Scrcpy v2.4...
+if not exist "scrcpy.exe" (
+    curl -L -o scrcpy.zip "https://github.com/Genymobile/scrcpy/releases/download/v2.4/scrcpy-win64-v2.4.zip" --timeout 120
+    if errorlevel 1 (
+        echo [ERROR] Failed to download Scrcpy
+        echo   Please download manually from:
+        echo   https://github.com/Genymobile/scrcpy/releases
+        pause
+        exit /b 1
+    )
+    powershell -command "Expand-Archive -Path scrcpy.zip -DestinationPath . -Force"
+    move scrcpy-win64-v2.4\\scrcpy.exe . >nul 2>&1
+    xcopy scrcpy-win64-v2.4\\*.dll . /Y >nul 2>&1
+    if exist scrcpy-win64-v2.4\\share xcopy scrcpy-win64-v2.4\\share share\\ /E /Y /I >nul 2>&1
+    del scrcpy.zip
+    rmdir /s /q scrcpy-win64-v2.4
+    echo   Scrcpy OK
+) else (
+    echo   Scrcpy already exists
+)
+
+:: 4. Add to PATH
+echo [3/3] Adding to PATH...
+setx PATH "%PATH%;%INSTALL_DIR%" >nul 2>&1
+set "PATH=%PATH%;%INSTALL_DIR%"
+
+echo.
+echo ========================================
+echo   Install complete!
+echo   Location: %INSTALL_DIR%
+echo.
+echo   Usage:
+echo     adb connect TV_IP:5555
+echo     scrcpy -s TV_IP:5555
+echo ========================================
+echo.
+pause
+'''
+    from fastapi.responses import Response
+    return Response(
+        content=script,
+        media_type="application/bat",
+        headers={"Content-Disposition": "attachment; filename=install_scrcpy.bat"}
+    )
+
 @app.post("/api/v1/devices/{device_id}/scrcpy/start")
 async def start_scrcpy_session(device_id: int, db: Session = Depends(get_db)):
     """启动Scrcpy远程控制会话"""
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=404, detail="设备未找到")
     
     ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
     if not ip or ip == "0.0.0.0":
-        raise HTTPException(status_code=400, detail="Device has no valid IP for ADB")
+        raise HTTPException(status_code=400, detail="设备没有可用于ADB连接的IP地址")
     
     result = scrcpy_manager.start_scrcpy(device_id, ip)
     
@@ -608,11 +784,11 @@ async def adb_connect_device(device_id: int, db: Session = Depends(get_db)):
     """通过ADB连接到设备"""
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=404, detail="设备未找到")
     
     ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
     if not ip or ip == "0.0.0.0":
-        raise HTTPException(status_code=400, detail="Device has no valid IP for ADB")
+        raise HTTPException(status_code=400, detail="设备没有可用于ADB连接的IP地址")
     
     adb_path = resolve_adb_path()
     
@@ -636,11 +812,11 @@ async def adb_disconnect_device(device_id: int, db: Session = Depends(get_db)):
     """断开ADB连接"""
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=404, detail="设备未找到")
     
     ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
     if not ip or ip == "0.0.0.0":
-        raise HTTPException(status_code=400, detail="Device has no valid IP for ADB")
+        raise HTTPException(status_code=400, detail="设备没有可用于ADB连接的IP地址")
     
     adb_path = resolve_adb_path()
     
@@ -660,11 +836,11 @@ async def get_scrcpy_command(device_id: int, db: Session = Depends(get_db)):
     """获取Scrcpy启动命令（供用户手动执行）"""
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=404, detail="设备未找到")
     
     ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
     if not ip or ip == "0.0.0.0":
-        raise HTTPException(status_code=400, detail="Device has no valid IP for ADB")
+        raise HTTPException(status_code=400, detail="设备没有可用于ADB连接的IP地址")
     
     scrcpy_path = get_scrcpy_path()
     if not scrcpy_path:
@@ -689,11 +865,11 @@ async def get_scrcpy_command(device_id: int, db: Session = Depends(get_db)):
 def device_input(device_id: int, action: str, key: str = None, x: int = None, y: int = None, db: Session = Depends(get_db)):
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=404, detail="设备未找到")
     
     ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
     if not ip or ip == "0.0.0.0":
-        raise HTTPException(status_code=400, detail="Device has no valid IP for ADB")
+        raise HTTPException(status_code=400, detail="设备没有可用于ADB连接的IP地址")
 
     adb_path = resolve_adb_path()
     
@@ -712,22 +888,88 @@ def device_input(device_id: int, action: str, key: str = None, x: int = None, y:
     except Exception as e:
         return {"ok": False, "detail": str(e)}
 
+@app.post("/api/v1/devices/{device_id}/adb/shell")
+def adb_shell(device_id: int, command: str = "", db: Session = Depends(get_db)):
+    """执行任意ADB命令并返回输出"""
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="设备未找到")
+
+    ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
+    if not ip or ip == "0.0.0.0":
+        raise HTTPException(status_code=400, detail="设备没有可用于ADB连接的IP地址")
+
+    if not command.strip():
+        raise HTTPException(status_code=400, detail="命令不能为空")
+
+    # 安全过滤：禁止危险命令
+    dangerous_patterns = ["rm -rf /", "format", "mkfs", "dd if=", "> /dev/", "shutdown"]
+    cmd_lower = command.lower()
+    for pattern in dangerous_patterns:
+        if pattern in cmd_lower:
+            raise HTTPException(status_code=403, detail=f"禁止执行的命令模式: {pattern}")
+
+    adb_path = resolve_adb_path()
+    try:
+        subprocess.run([adb_path, "connect", f"{ip}:5555"], timeout=5, capture_output=True)
+        # 构建完整命令
+        full_cmd = [adb_path, "-s", f"{ip}:5555"] + command.split()
+        result = subprocess.run(full_cmd, capture_output=True, text=True, timeout=30)
+        output = result.stdout + result.stderr
+        return {"ok": True, "output": output.strip(), "exit_code": result.returncode}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "output": "命令执行超时(30秒)", "exit_code": -1}
+    except Exception as e:
+        return {"ok": False, "output": str(e), "exit_code": -1}
+
+@app.post("/api/v1/scrcpy/connect-by-ip")
+def scrcpy_connect_by_ip(ip: str):
+    """通过IP直接连接ADB并启动scrcpy"""
+    if not ip or ip.strip() == "":
+        raise HTTPException(status_code=400, detail="IP地址不能为空")
+
+    ip = ip.strip()
+    adb_path = resolve_adb_path()
+    try:
+        # 连接ADB
+        connect_result = subprocess.run(
+            [adb_path, "connect", f"{ip}:5555"],
+            capture_output=True, text=True, timeout=10
+        )
+        if "refused" in connect_result.stdout.lower() or "failed" in connect_result.stdout.lower():
+            return {"ok": False, "message": f"ADB连接失败: {connect_result.stdout.strip()}"}
+
+        # 启动scrcpy
+        scrcpy_path = get_scrcpy_path()
+        if not scrcpy_path:
+            return {"ok": False, "message": "Scrcpy未安装，请先安装Scrcpy"}
+
+        subprocess.Popen(
+            [scrcpy_path, "--serial", f"{ip}:5555", "--no-audio", "--max-fps", "30", "--max-size", "1024", "--always-on-top"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+        return {"ok": True, "message": f"已连接 {ip}:5555 并启动Scrcpy"}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "message": "ADB连接超时"}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
 @app.post("/api/v1/devices/{device_id}/adb-install")
 def adb_install(device_id: int, db: Session = Depends(get_db)):
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=404, detail="设备未找到")
     
     ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
     if not ip or ip == "0.0.0.0":
-        raise HTTPException(status_code=400, detail="Device has no valid IP for ADB")
+        raise HTTPException(status_code=400, detail="设备没有可用于ADB连接的IP地址")
     
     adb_path = resolve_adb_path()
     # Search for APK in android_app folder
-    apk_path = "../android_app/app/build/outputs/apk/debug/app-debug.apk"
+    apk_path = os.path.join(BASE_DIR, "..", "android_app", "app", "build", "outputs", "apk", "debug", "app-debug.apk")
     
     if not os.path.exists(apk_path):
-        return {"ok": False, "detail": f"APK not found at {apk_path}"}
+        return {"ok": False, "detail": f"未找到APK安装包: {apk_path}"}
 
     try:
         subprocess.run([adb_path, "connect", ip], timeout=10)
@@ -740,40 +982,222 @@ def adb_install(device_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         return {"ok": False, "detail": str(e)}
 
-@app.post("/api/v1/devices/{device_id}/uninstall")
-def uninstall_app(device_id: int, package_name: str, db: Session = Depends(get_db)):
+@app.post("/api/v1/devices/{device_id}/silent-upgrade")
+def silent_upgrade(device_id: int, db: Session = Depends(get_db)):
+    """静默升级管理应用到最新版本（不影响电视当前操作）
+    使用 adb install -r 覆盖安装，APP正在运行时也能安装。
+    安装完成后APP会自动恢复运行（保活服务+开机自启机制）。
+    """
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
-    
+        raise HTTPException(status_code=404, detail="设备未找到")
+
     ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
     if not ip or ip == "0.0.0.0":
-        raise HTTPException(status_code=400, detail="Device has no valid IP for ADB")
+        raise HTTPException(status_code=400, detail="设备没有可用于ADB连接的IP地址")
 
     adb_path = resolve_adb_path()
-    
+    # 优先查找最新上传的APK，其次查找构建输出
+    upload_dir = os.path.join(BASE_DIR, "static", "uploads")
+    latest_apk = None
+
+    # 查找上传目录中最新的 tvlauncher APK
+    if os.path.exists(upload_dir):
+        uploaded_apks = [
+            os.path.join(upload_dir, f) for f in os.listdir(upload_dir)
+            if f.endswith('.apk') and 'tvlauncher' in f.lower()
+        ]
+        if uploaded_apks:
+            latest_apk = max(uploaded_apks, key=os.path.getmtime)
+
+    # 如果上传目录没有，查找构建输出
+    if not latest_apk:
+        build_apk = os.path.join(BASE_DIR, "..", "android_app", "app", "build", "outputs", "apk", "debug", "app-debug.apk")
+        if os.path.exists(build_apk):
+            latest_apk = build_apk
+
+    if not latest_apk or not os.path.exists(latest_apk):
+        return {"ok": False, "detail": "未找到APK文件，请先上传或构建APK"}
+
     try:
-        subprocess.run([adb_path, "connect", ip], timeout=5)
-        result = subprocess.run([adb_path, "-s", f"{ip}:5555", "shell", "pm", "uninstall", package_name], capture_output=True, text=True, timeout=30)
+        # 1. 连接设备
+        subprocess.run([adb_path, "connect", f"{ip}:5555"], timeout=10, capture_output=True)
+
+        # 2. 获取当前版本号（安装前）
+        version_before = subprocess.run(
+            [adb_path, "-s", f"{ip}:5555", "shell", "dumpsys", "package", "com.company.tvlauncher"],
+            capture_output=True, text=True, timeout=10
+        )
+        old_version = ""
+        for line in version_before.stdout.split('\n'):
+            if 'versionName' in line:
+                old_version = line.strip()
+                break
+
+        # 3. 静默覆盖安装（-r: 替换已有应用，不需要用户确认）
+        result = subprocess.run(
+            [adb_path, "-s", f"{ip}:5555", "install", "-r", latest_apk],
+            capture_output=True, text=True, timeout=120
+        )
+
         if result.returncode != 0:
-            return {"ok": False, "detail": result.stderr or result.stdout}
-        log_operation(db, "uninstall", f"从设备 {device.device_name} 卸载应用 {package_name}", device_id, device.device_name)
-        return {"ok": True, "message": "卸载成功"}
+            output = result.stderr or result.stdout
+            # 如果覆盖安装失败，尝试先停止APP再安装
+            if "INSTALL_FAILED" in output:
+                subprocess.run([adb_path, "-s", f"{ip}:5555", "shell", "am", "force-stop", "com.company.tvlauncher"], timeout=5, capture_output=True)
+                time.sleep(1)
+                result = subprocess.run(
+                    [adb_path, "-s", f"{ip}:5555", "install", "-r", latest_apk],
+                    capture_output=True, text=True, timeout=120
+                )
+                if result.returncode != 0:
+                    return {"ok": False, "detail": f"安装失败: {result.stderr or result.stdout}"}
+
+        # 4. 安装成功后，APP会被系统自动重启（因为 persistent=true + 前台服务）
+        # 稍等片刻让APP重启
+        time.sleep(3)
+
+        # 5. 确保APP已启动
+        subprocess.run([adb_path, "-s", f"{ip}:5555", "shell", "am", "start", "-n", "com.company.tvlauncher/.MainActivity"], timeout=10, capture_output=True)
+
+        apk_name = os.path.basename(latest_apk)
+        apk_size = os.path.getsize(latest_apk) // 1024
+        log_operation(db, "silent_upgrade", f"静默升级 {device.device_name}，APK: {apk_name} ({apk_size}KB)", device_id, device.device_name)
+        return {"ok": True, "message": f"升级成功，APK: {apk_name} ({apk_size}KB)，应用已自动重启"}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "detail": "安装超时（设备可能不响应）"}
     except Exception as e:
         return {"ok": False, "detail": str(e)}
+
+@app.post("/api/v1/devices/{device_id}/uninstall")
+def uninstall_app(device_id: int, package_name: str, is_system: bool = False, db: Session = Depends(get_db)):
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="设备未找到")
+
+    ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
+    if not ip or ip == "0.0.0.0":
+        raise HTTPException(status_code=400, detail="设备没有可用于ADB连接的IP地址")
+
+    adb_path = resolve_adb_path()
+
+    try:
+        subprocess.run([adb_path, "connect", ip], timeout=5)
+        if is_system:
+            # System app: use pm uninstall --user 0 (disable for current user)
+            result = subprocess.run([adb_path, "-s", f"{ip}:5555", "shell", "pm", "uninstall", "--user", "0", package_name], capture_output=True, text=True, timeout=30)
+        else:
+            # Normal app: use pm uninstall (full uninstall)
+            result = subprocess.run([adb_path, "-s", f"{ip}:5555", "shell", "pm", "uninstall", package_name], capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            return {"ok": False, "detail": result.stderr or result.stdout}
+        # Check output for common failure patterns
+        output = (result.stdout or "") + (result.stderr or "")
+        if "DELETE_FAILED_INTERNAL_ERROR" in output:
+            return {"ok": False, "detail": "系统应用无法完全卸载，请使用冻结功能"}
+        log_operation(db, "uninstall", f"从设备 {device.device_name} 卸载应用 {package_name}{'(系统应用)' if is_system else ''}", device_id, device.device_name)
+        return {"ok": True, "message": "卸载成功" if not is_system else "已停用该系统应用（恢复出厂设置可恢复）"}
+    except Exception as e:
+        return {"ok": False, "detail": str(e)}
+
+@app.post("/api/v1/devices/{device_id}/launch-app")
+def launch_app(device_id: int, package_name: str, db: Session = Depends(get_db)):
+    """通过ADB启动指定应用"""
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="设备未找到")
+
+    ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
+    if not ip or ip == "0.0.0.0":
+        raise HTTPException(status_code=400, detail="设备没有可用于ADB连接的IP地址")
+
+    adb_path = resolve_adb_path()
+
+    try:
+        subprocess.run([adb_path, "connect", ip], timeout=5)
+        # Use monkey command to launch app's main activity reliably
+        result = subprocess.run(
+            [adb_path, "-s", f"{ip}:5555", "shell", "monkey", "-p", package_name, "-c", "android.intent.category.LAUNCHER", "1"],
+            capture_output=True, text=True, timeout=15
+        )
+        if result.returncode != 0:
+            # Fallback: try am start with main activity
+            result2 = subprocess.run(
+                [adb_path, "-s", f"{ip}:5555", "shell", "am", "start", "-n", f"{package_name}/.MainActivity"],
+                capture_output=True, text=True, timeout=15
+            )
+            if result2.returncode != 0:
+                return {"ok": False, "detail": result2.stderr or result2.stdout or "启动失败"}
+        log_operation(db, "launch_app", f"在设备 {device.device_name} 启动应用 {package_name}", device_id, device.device_name)
+        return {"ok": True, "message": f"已启动 {package_name}"}
+    except Exception as e:
+        return {"ok": False, "detail": str(e)}
+
+@app.post("/api/v1/devices/{device_id}/enable-app")
+def enable_app(device_id: int, package_name: str, db: Session = Depends(get_db)):
+    """通过ADB重新启用已停用的应用（pm install-existing）"""
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="设备未找到")
+
+    ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
+    if not ip or ip == "0.0.0.0":
+        raise HTTPException(status_code=400, detail="设备没有可用于ADB连接的IP地址")
+
+    adb_path = resolve_adb_path()
+    try:
+        subprocess.run([adb_path, "connect", ip], timeout=5)
+        # pm install-existing restores app for current user
+        result = subprocess.run(
+            [adb_path, "-s", f"{ip}:5555", "shell", "pm", "install-existing", package_name],
+            capture_output=True, text=True, timeout=15
+        )
+        output = (result.stdout or "") + (result.stderr or "")
+        if "Success" in output or result.returncode == 0:
+            log_operation(db, "enable_app", f"在设备 {device.device_name} 重新启用应用 {package_name}", device_id, device.device_name)
+            return {"ok": True, "message": f"已启用 {package_name}"}
+        return {"ok": False, "detail": output.strip() or "启用失败"}
+    except Exception as e:
+        return {"ok": False, "detail": str(e)}
+
+@app.post("/api/v1/adb/shell-by-ip")
+def adb_shell_by_ip(ip: str, command: str = ""):
+    """直接通过IP执行ADB命令（无需设备在数据库中）"""
+    if not ip.strip():
+        raise HTTPException(status_code=400, detail="IP不能为空")
+    if not command.strip():
+        raise HTTPException(status_code=400, detail="命令不能为空")
+
+    dangerous_patterns = ["rm -rf /", "format", "mkfs", "dd if=", "> /dev/", "shutdown"]
+    cmd_lower = command.lower()
+    for pattern in dangerous_patterns:
+        if pattern in cmd_lower:
+            raise HTTPException(status_code=403, detail=f"禁止执行的命令模式: {pattern}")
+
+    adb_path = resolve_adb_path()
+    try:
+        subprocess.run([adb_path, "connect", f"{ip}:5555"], timeout=5, capture_output=True)
+        full_cmd = [adb_path, "-s", f"{ip}:5555"] + command.split()
+        result = subprocess.run(full_cmd, capture_output=True, text=True, timeout=30)
+        output = result.stdout + result.stderr
+        return {"ok": True, "output": output.strip(), "exit_code": result.returncode}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "output": "命令执行超时(30秒)", "exit_code": -1}
+    except Exception as e:
+        return {"ok": False, "output": str(e), "exit_code": -1}
 
 @app.post("/api/v1/devices/{device_id}/install-uploaded")
 def install_uploaded(device_id: int, filename: str, db: Session = Depends(get_db)):
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=404, detail="设备未找到")
     
     ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
     if not ip or ip == "0.0.0.0":
-        raise HTTPException(status_code=400, detail="Device has no valid IP for ADB")
+        raise HTTPException(status_code=400, detail="设备没有可用于ADB连接的IP地址")
 
     adb_path = resolve_adb_path()
-    apk_path = f"static/uploads/{filename}"
+    apk_path = os.path.join(BASE_DIR, f"static/uploads/{filename}")
     
     if not os.path.exists(apk_path):
         return {"ok": False, "detail": f"APK 文件不存在: {filename}"}
@@ -793,10 +1217,10 @@ async def upload_apk(file: UploadFile = File(...)):
     if not file.filename.endswith('.apk'):
         raise HTTPException(status_code=400, detail="只支持 APK 文件")
     
-    upload_dir = "static/uploads"
+    upload_dir = os.path.join(BASE_DIR, "static", "uploads")
     if not os.path.exists(upload_dir):
         os.makedirs(upload_dir)
-    
+
     file_path = os.path.join(upload_dir, file.filename)
     with open(file_path, "wb") as f:
         content = await file.read()
@@ -807,7 +1231,7 @@ async def upload_apk(file: UploadFile = File(...)):
 @app.get("/", response_class=HTMLResponse)
 def index():
     try:
-        with open("app/templates/index.html", "r", encoding="utf-8") as f:
+        with open(os.path.join(BASE_DIR, "app/templates/index.html"), "r", encoding="utf-8") as f:
             return f.read()
     except:
         return "<h1>Dashboard Template Missing</h1>"
@@ -816,7 +1240,7 @@ def index():
 def delete_policy(policy_id: int, db: Session = Depends(get_db)):
     policy = db.query(Policy).filter(Policy.id == policy_id).first()
     if not policy:
-        raise HTTPException(status_code=404, detail="Policy not found")
+        raise HTTPException(status_code=404, detail="策略未找到")
     policy_name = policy.name
     db.delete(policy)
     db.commit()
@@ -827,12 +1251,130 @@ def delete_policy(policy_id: int, db: Session = Depends(get_db)):
 def delete_device(device_id: int, db: Session = Depends(get_db)):
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=404, detail="设备未找到")
     device_name = device.device_name
+    device_ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
+
+    # 通过ADB通知TV APP注销（清除本地token，防止自动重新注册）
+    if device_ip and device_ip != "0.0.0.0":
+        try:
+            adb_path = resolve_adb_path()
+            subprocess.run([adb_path, "connect", f"{device_ip}:5555"], timeout=5, capture_output=True)
+            # 1. 先强制停止APP
+            subprocess.run([adb_path, "-s", f"{device_ip}:5555", "shell",
+                           "am force-stop com.company.tvlauncher"], timeout=5, capture_output=True)
+            # 2. 卸载APP
+            result = subprocess.run([adb_path, "-s", f"{device_ip}:5555", "shell",
+                           "pm uninstall com.company.tvlauncher"], timeout=15, capture_output=True, text=True)
+            uninstall_ok = "Success" in (result.stdout or "")
+            if not uninstall_ok:
+                # 卸载失败时尝试清除数据
+                subprocess.run([adb_path, "-s", f"{device_ip}:5555", "shell",
+                               "pm clear com.company.tvlauncher"], timeout=10, capture_output=True)
+            log_operation(db, "deregister_device", f"已通过ADB卸载设备APP: {device_name} (卸载{'成功' if uninstall_ok else '失败，已清除数据'})", device_id, device_name)
+        except Exception as e:
+            log_operation(db, "deregister_device_failed", f"ADB注销失败(设备可能离线): {str(e)}", device_id, device_name)
+
     db.delete(device)
     db.commit()
     log_operation(db, "delete_device", f"移除了设备: {device_name}", device_id, device_name)
     return {"ok": True}
+
+@app.get("/api/v1/devices/connectivity-check")
+def connectivity_check(db: Session = Depends(get_db)):
+    """批量检测所有设备的 ping 和 ADB 连通状态（并行检测，快速返回）"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    devices = db.query(Device).all()
+    adb_path = resolve_adb_path()
+    results = {}
+
+    def check_device(device):
+        ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
+        if not ip or ip == "0.0.0.0":
+            return device.id, {"ping": False, "adb": False, "reason": "无IP"}
+
+        # Ping check
+        ping_ok = False
+        try:
+            ping_cmd = ["ping", "-n", "1", "-w", "1500", ip] if os.name == "nt" else ["ping", "-c", "1", "-W", "2", ip]
+            ping_result = subprocess.run(ping_cmd, capture_output=True, text=True, timeout=3)
+            ping_ok = ping_result.returncode == 0
+        except Exception:
+            pass
+
+        # ADB check (only if ping is ok)
+        adb_ok = False
+        adb_reason = ""
+        if ping_ok:
+            try:
+                # 先尝试连接
+                conn_result = subprocess.run([adb_path, "connect", f"{ip}:5555"], timeout=5, capture_output=True, text=True)
+                conn_output = (conn_result.stdout or "").lower()
+
+                # 判断连接结果
+                if "refused" in conn_output:
+                    adb_reason = "电视ADB未开启，需在电视上手动打开"
+                elif "failed" in conn_output and "connected" not in conn_output:
+                    adb_reason = "ADB无法连接，电视可能关机或断网"
+                else:
+                    # 连接成功或已连接，验证 shell 是否可用
+                    shell_result = subprocess.run(
+                        [adb_path, "-s", f"{ip}:5555", "shell", "echo", "ok"],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    stdout = (shell_result.stdout or "")
+                    stderr = (shell_result.stderr or "")
+                    combined = stdout + stderr
+
+                    if "ok" in stdout:
+                        adb_ok = True
+                    elif "unauthorized" in combined:
+                        adb_reason = "电视上未授权ADB，请在电视屏幕点击'允许'"
+                    elif "offline" in combined:
+                        adb_reason = "电视ADB处于离线状态，尝试重启电视"
+                    elif "refused" in combined.lower():
+                        adb_reason = "电视ADB未开启，需在电视上手动打开"
+                    else:
+                        # 有输出但不是ok，可能是设备拒绝了shell
+                        adb_reason = "ADB已连接但无法操作，电视可能卡顿"
+            except subprocess.TimeoutExpired:
+                adb_reason = "ADB连接超时，电视可能卡顿或网络不稳定"
+            except FileNotFoundError:
+                adb_reason = "未找到ADB工具，请检查安装"
+            except Exception:
+                adb_reason = "ADB检测出错，请稍后重试"
+        else:
+            adb_reason = "网络不通，电视可能关机或断网"
+
+        return device.id, {"ping": ping_ok, "adb": adb_ok, "reason": adb_reason}
+
+    # 并行检测所有设备
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {executor.submit(check_device, d): d for d in devices}
+        for future in as_completed(futures):
+            try:
+                dev_id, result = future.result(timeout=10)
+                results[dev_id] = result
+            except Exception as e:
+                dev = futures[future]
+                results[dev.id] = {"ping": False, "adb": False, "reason": str(e)[:30]}
+
+    # 根据检测结果更新数据库中的 online 状态
+    updated = False
+    for device in devices:
+        conn = results.get(device.id)
+        if not conn:
+            continue
+        # ping 通即视为网络在线；ping 不通则离线
+        new_online = conn["ping"]
+        if device.online != new_online:
+            device.online = new_online
+            updated = True
+            print(f"[连通性检测] {device.device_name} online: {device.online} -> {new_online}")
+    if updated:
+        db.commit()
+
+    return results
 
 @app.get("/api/v1/logs", response_model=list[OperationLogOut])
 def list_logs(limit: int = 50, db: Session = Depends(get_db)):
@@ -845,13 +1387,15 @@ def clear_logs(db: Session = Depends(get_db)):
     return {"ok": True}
 
 @app.get("/api/v1/ota/check")
-def ota_check(version: str = "0.0.0"):
+def ota_check(version: str = "0.0.0", host: str = Header(default="localhost:8000")):
     latest_version = "0.1.5"
     if version < latest_version:
+        # 使用请求的host构建下载URL，确保TV能访问到
+        scheme_host = f"http://{host}" if not host.startswith("http") else host
         return {
             "update_available": True,
             "latest_version": latest_version,
-            "url": "http://localhost:8000/static/ota/app-debug.apk",
+            "url": f"{scheme_host}/static/ota/app-debug.apk",
             "silent": True
         }
     return {"update_available": False}
@@ -930,14 +1474,14 @@ async def websocket_screen_stream(websocket: WebSocket, device_id: int):
 async def screen_stream(device_id: int, db: Session = Depends(get_db)):
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=404, detail="设备未找到")
     
     ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
     if not ip or ip == "0.0.0.0":
-        raise HTTPException(status_code=400, detail="Device has no valid IP for ADB")
+        raise HTTPException(status_code=400, detail="设备没有可用于ADB连接的IP地址")
     
     adb_path = resolve_adb_path()
-    local_path = f"static/screenshots/device_{device_id}_stream.png"
+    local_path = os.path.join(BASE_DIR, f"static/screenshots/device_{device_id}_stream.png")
     
     try:
         # 连接设备
@@ -956,7 +1500,7 @@ async def screen_stream(device_id: int, db: Session = Depends(get_db)):
         # 发送给WebSocket客户端
         await manager.send_screenshot(device_id, image_data)
         
-        return {"ok": True, "message": "Screenshot captured and sent"}
+        return {"ok": True, "message": "截图已捕获并发送"}
     except Exception as e:
         return {"ok": False, "detail": str(e)}
 
@@ -965,11 +1509,11 @@ async def screen_stream(device_id: int, db: Session = Depends(get_db)):
 async def mouse_control(device_id: int, action: str, x: int = None, y: int = None, db: Session = Depends(get_db)):
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=404, detail="设备未找到")
     
     ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
     if not ip or ip == "0.0.0.0":
-        raise HTTPException(status_code=400, detail="Device has no valid IP for ADB")
+        raise HTTPException(status_code=400, detail="设备没有可用于ADB连接的IP地址")
     
     adb_path = resolve_adb_path()
     
@@ -980,20 +1524,20 @@ async def mouse_control(device_id: int, action: str, x: int = None, y: int = Non
             if x is not None and y is not None:
                 subprocess.run([adb_path, "-s", f"{ip}:5555", "shell", "input", "tap", str(x), str(y)], check=True, timeout=5)
                 log_operation(db, "mouse_tap", f"点击位置 ({x}, {y})", device_id, device.device_name)
-                return {"ok": True, "message": f"Tap at ({x}, {y})"}
+                return {"ok": True, "message": f"已点击 ({x}, {y})"}
             else:
-                return {"ok": False, "detail": "Missing x or y coordinates"}
+                return {"ok": False, "detail": "缺少 x 或 y 坐标"}
         
         elif action == "swipe":
             # 需要起始点和结束点
-            return {"ok": False, "detail": "Swipe action requires start and end coordinates"}
+            return {"ok": False, "detail": "滑动操作需要起始和结束坐标"}
         
         elif action == "drag":
             # 拖拽操作
-            return {"ok": False, "detail": "Drag action requires start and end coordinates"}
+            return {"ok": False, "detail": "拖拽操作需要起始和结束坐标"}
         
         else:
-            return {"ok": False, "detail": f"Unknown action: {action}"}
+            return {"ok": False, "detail": f"未知操作: {action}"}
     
     except Exception as e:
         return {"ok": False, "detail": str(e)}

@@ -80,9 +80,8 @@ class MainActivity : AppCompatActivity() {
             showPasswordDialog(policyStore)
         }
         findViewById<LinearLayout>(R.id.executeBtn).setOnClickListener {
-            // 用户手动点击按钮执行策略
-            android.util.Log.d("MainActivity", "按钮点击触发策略执行")
-            forceExecutePolicy(policyStore, userTriggered = true)
+            // 用户手动点击按钮：启动目标APP一次（即使策略暂停也生效，但不改变暂停状态）
+            launchTargetOnce(policyStore)
         }
 
         // 注册策略更新广播接收器
@@ -111,6 +110,37 @@ class MainActivity : AppCompatActivity() {
             }
         }
         timeUpdateHandler?.post(timeUpdateRunnable!!)
+    }
+
+    /**
+     * 手动启动目标APP一次（按钮点击）
+     * 不管策略是否暂停，都启动目标APP一次。
+     * 不启动保活服务，不改变暂停状态 —— 仅启动一次。
+     * 用途：测试目标APP是否正常，或在策略被误暂停时临时启动一次。
+     */
+    private fun launchTargetOnce(policyStore: PolicyStore) {
+        val policy = policyStore.getPolicy()
+
+        if (!isPolicyValid(policy)) {
+            showNoPolicyDialog()
+            return
+        }
+
+        val executor = LauncherExecutor(this)
+        val isPaused = policyStore.isPolicyPaused()
+
+        when (policy.mode) {
+            "app" -> {
+                android.util.Log.d("MainActivity", "手动启动目标APP一次: ${policy.targetAppPackage} (暂停=$isPaused)")
+                executor.launchApp(policy.targetAppPackage)
+            }
+            "hdmi" -> {
+                android.util.Log.d("MainActivity", "手动切换HDMI一次: HDMI${policy.targetHdmiPort} (暂停=$isPaused)")
+                ioExecutor.execute {
+                    executor.execute(policy)
+                }
+            }
+        }
     }
 
     private fun forceExecutePolicy(policyStore: PolicyStore, force: Boolean = false, userTriggered: Boolean = false, forceRestart: Boolean = false) {
@@ -308,6 +338,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        // 更新Launcher前台状态（供isAppRunning检测使用）
+        getSharedPreferences("tv_policy", Context.MODE_PRIVATE)
+            .edit().putBoolean("launcher_foreground", true).apply()
+        android.util.Log.d("MainActivity", "Launcher前台状态: true")
+
         val policyStore = PolicyStore(this)
         refreshStatus(policyStore)
 
@@ -323,13 +358,26 @@ class MainActivity : AppCompatActivity() {
             val net = NetworkInfoProvider(this).collect()
             val api = RemoteApi(this, policyStore)
 
-            // Try online operations
-            val registered = api.registerIfNeeded("MeetingTV", net)
+            // 注册流程：没有token就注册，有心跳失败就清除token重新注册
+            val hasToken = policyStore.getDeviceToken() != null
+            if (!hasToken) {
+                val registered = api.registerIfNeeded("MeetingTV", net)
+                if (!registered) {
+                    android.util.Log.w("MainActivity", "注册失败，请检查服务器地址和网络")
+                    mainHandler.post { refreshStatus(policyStore) }
+                    return@execute
+                }
+            }
+
             var heartbeatSuccess = api.heartbeat(net)
             if (!heartbeatSuccess) {
+                // 心跳失败：token可能已失效（设备被移除），清除后重新注册
+                android.util.Log.w("MainActivity", "心跳失败，清除token并重新注册")
                 policyStore.clearDeviceToken()
-                api.registerIfNeeded("MeetingTV", net)
-                heartbeatSuccess = api.heartbeat(net)
+                val reRegistered = api.registerIfNeeded("MeetingTV", net)
+                if (reRegistered) {
+                    heartbeatSuccess = api.heartbeat(net)
+                }
             }
 
             // 同步完成后，在主线程更新状态并决定是否执行策略
@@ -354,6 +402,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        // 更新Launcher前台状态（供isAppRunning检测使用）
+        getSharedPreferences("tv_policy", Context.MODE_PRIVATE)
+            .edit().putBoolean("launcher_foreground", false).apply()
+        android.util.Log.d("MainActivity", "Launcher前台状态: false")
+
         // 启动保活服务，确保策略APP一直在前台
         val policyStore = PolicyStore(this)
         val policy = policyStore.getPolicy()
@@ -578,15 +631,19 @@ class MainActivity : AppCompatActivity() {
 
         // 更新策略运行状态（显示暂停/运行中）
         val policyStatusIndicator = findViewById<TextView>(R.id.policyStatusIndicator)
+        val executeBtnSubtitle = findViewById<TextView>(R.id.executeBtnSubtitle)
         if (isPaused) {
             policyStatusIndicator.text = "已暂停"
             policyStatusIndicator.setTextColor(getColor(android.R.color.holo_orange_light))
+            executeBtnSubtitle.text = "策略已暂停，点击启动一次"
         } else if (isPolicyValid(policy)) {
             policyStatusIndicator.text = "运行中"
             policyStatusIndicator.setTextColor(getColor(android.R.color.holo_green_light))
+            executeBtnSubtitle.text = "点击立即执行策略"
         } else {
             policyStatusIndicator.text = "未配置"
             policyStatusIndicator.setTextColor(getColor(android.R.color.darker_gray))
+            executeBtnSubtitle.text = "点击立即执行策略"
         }
 
         // 更新连接指示器

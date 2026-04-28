@@ -118,6 +118,7 @@ class RemoteApi(
             .put("wifi_mac", network.wifiMac)
             .put("eth_mac", network.ethMac)
             .put("network_ssid", network.ssid)
+            .put("network_type", network.networkType)
             .put("installed_apps", appsJson)
             .put("ram_usage", getRamUsage())
             .put("storage_usage", getStorageUsage())
