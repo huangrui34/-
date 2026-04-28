@@ -184,6 +184,8 @@ class LauncherExecutor(private val context: Context) {
         // Launcher在前台，尝试其他检测方式作为补充
         try {
             // 方法1：通过pidof命令检查
+            // 注意：部分Android版本(如6.0)的pidof会忽略包名参数，返回所有进程PID
+            // 正常pidof应返回单个PID或少数几个(同包名多进程)，如果返回大量PID说明命令无效
             try {
                 val process = Runtime.getRuntime().exec(arrayOf("pidof", packageName))
                 val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
@@ -191,8 +193,15 @@ class LauncherExecutor(private val context: Context) {
                 reader.close()
                 process.waitFor()
                 if (!output.isNullOrBlank()) {
-                    android.util.Log.d(TAG, "通过pidof找到进程: $packageName (pid=$output)")
-                    return true
+                    val pidCount = output.trim().split(Regex("\\s+")).size
+                    if (pidCount <= 3) {
+                        // 正常情况：1-3个PID（主进程+可能的子进程）
+                        android.util.Log.d(TAG, "通过pidof找到进程: $packageName (pid=$output)")
+                        return true
+                    } else {
+                        // 异常：返回了大量PID，说明pidof忽略了包名参数，结果不可信
+                        android.util.Log.d(TAG, "pidof返回${pidCount}个PID，忽略不可信结果，继续其他检测")
+                    }
                 }
             } catch (e: Exception) {
                 android.util.Log.d(TAG, "pidof命令失败: ${e.message}")

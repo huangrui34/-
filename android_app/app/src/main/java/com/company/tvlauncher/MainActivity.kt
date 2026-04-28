@@ -519,10 +519,24 @@ class MainActivity : AppCompatActivity() {
 
                     when (policy.mode) {
                         "app" -> {
-                            // APP模式：检查目标APP是否在运行
-                            if (!executor.isAppRunning(policy.targetAppPackage)) {
-                                android.util.Log.d("MainActivity", "目标APP未运行，重新启动: ${policy.targetAppPackage}")
+                            // APP模式：检查目标APP是否在前台运行
+                            // 仅检查进程存在不够：用户按返回键后APP退到后台，进程还在但不在前台
+                            // 正确做法：如果Launcher自己在前台，说明目标APP不在前台，需要重新拉起
+                            val isLauncherFg = isLauncherInForegroundCheck()
+                            if (isLauncherFg) {
+                                // Launcher在前台 = 目标APP不在前台（可能退到后台或被关闭）
+                                // 无论进程是否存在，都需要把目标APP拉到前台
+                                android.util.Log.d("MainActivity", "Launcher在前台，目标APP不在前台，重新拉起: ${policy.targetAppPackage}")
                                 executor.launchApp(policy.targetAppPackage)
+                            } else {
+                                // Launcher不在前台 = 有其他应用在前台
+                                // 检查是否是目标APP，如果不是则需要拉起
+                                val currentPkg = getCurrentFocusPackage()
+                                if (currentPkg != null && currentPkg != policy.targetAppPackage && !EXCLUDED_PACKAGES.any { currentPkg.contains(it) }) {
+                                    android.util.Log.d("MainActivity", "当前前台是 $currentPkg 而非目标APP，重新拉起: ${policy.targetAppPackage}")
+                                    executor.launchApp(policy.targetAppPackage)
+                                }
+                                // 如果当前前台就是目标APP，不需要操作
                             }
                         }
                         "hdmi" -> {
@@ -571,6 +585,15 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             null
         }
+    }
+
+    /**
+     * 检查Launcher自身是否在前台
+     * 使用SharedPreferences中由onResume/onPause更新的状态
+     */
+    private fun isLauncherInForegroundCheck(): Boolean {
+        val prefs = getSharedPreferences("tv_policy", Context.MODE_PRIVATE)
+        return prefs.getBoolean("launcher_foreground", true)
     }
 
     override fun onDestroy() {
