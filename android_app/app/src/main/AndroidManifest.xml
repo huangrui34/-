@@ -51,6 +51,16 @@
             </intent-filter>
         </receiver>
 
+        <!-- HDMI热插拔广播接收器 -->
+        <receiver
+            android:name=".HdmiReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.HDMI_PLUGGED" />
+            </intent-filter>
+        </receiver>
+
         <!-- 保活前台服务 -->
         <service
             android:name=".KeepAliveForegroundService"

@@ -103,6 +103,47 @@ class PolicyStore(private val context: Context) {
         prefs.edit().putBoolean("policy_paused", paused).apply()
     }
 
+    // HDMI自动切换：保存HDMI接入前的策略
+    fun savePreHdmiPolicy(policy: LaunchPolicy) {
+        prefs.edit()
+            .putString("pre_hdmi_policy_mode", policy.mode)
+            .putString("pre_hdmi_policy_app", policy.targetAppPackage)
+            .putInt("pre_hdmi_policy_hdmiport", policy.targetHdmiPort)
+            .apply()
+    }
+
+    fun getPreHdmiPolicy(): LaunchPolicy? {
+        val mode = prefs.getString("pre_hdmi_policy_mode", null) ?: return null
+        return LaunchPolicy(
+            mode = mode,
+            targetAppPackage = prefs.getString("pre_hdmi_policy_app", "com.example.cast")
+                ?: "com.example.cast",
+            targetHdmiPort = prefs.getInt("pre_hdmi_policy_hdmiport", 1)
+        )
+    }
+
+    fun clearPreHdmiPolicy() {
+        prefs.edit()
+            .remove("pre_hdmi_policy_mode")
+            .remove("pre_hdmi_policy_app")
+            .remove("pre_hdmi_policy_hdmiport")
+            .apply()
+    }
+
+    // HDMI自动切换标记：当前是否因HDMI接入而自动切换了策略
+    fun isHdmiAutoSwitched(): Boolean = prefs.getBoolean("hdmi_auto_switched", false)
+
+    fun setHdmiAutoSwitched(value: Boolean) {
+        prefs.edit().putBoolean("hdmi_auto_switched", value).apply()
+    }
+
+    // HDMI自动切换功能开关（用户可关闭）
+    fun isHdmiAutoSwitchEnabled(): Boolean = prefs.getBoolean("hdmi_auto_switch_enabled", true)
+
+    fun setHdmiAutoSwitchEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("hdmi_auto_switch_enabled", enabled).apply()
+    }
+
     /**
      * 应用远程策略
      * @return true 如果策略有变化，false 如果策略没有变化

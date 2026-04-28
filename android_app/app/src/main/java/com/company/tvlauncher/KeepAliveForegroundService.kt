@@ -84,9 +84,13 @@ class KeepAliveForegroundService : Service() {
         val statusText = if (isPaused) {
             "策略已暂停"
         } else {
+            val hdmiAutoSwitched = policyStore.isHdmiAutoSwitched()
             when (policy.mode) {
                 "app" -> "保活: ${policy.targetAppPackage}"
-                "hdmi" -> "保活: 小米电视播放器 (HDMI${policy.targetHdmiPort})"
+                "hdmi" -> {
+                    if (hdmiAutoSwitched) "HDMI自动切换中 (HDMI${policy.targetHdmiPort})"
+                    else "保活: 小米电视播放器 (HDMI${policy.targetHdmiPort})"
+                }
                 else -> "策略保活服务运行中"
             }
         }
