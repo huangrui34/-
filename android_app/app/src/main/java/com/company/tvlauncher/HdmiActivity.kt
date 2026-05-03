@@ -52,6 +52,7 @@ class HdmiActivity : Activity() {
     private var currentInputId: String? = null
     private var hasTuned = false
     private var hasFocus = false
+    private var isLeaving = false  // 标记正在离开，阻止延迟按键发送
     private val handler = Handler(Looper.getMainLooper())
     private var pendingTuneRunnable: Runnable? = null
     private var tuneTimeMs: Long = 0L  // 调谐时间，用于保护期判断
@@ -59,7 +60,9 @@ class HdmiActivity : Activity() {
     private val policyPauseReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == "com.company.tvlauncher.POLICY_PAUSED") {
-                Log.d(TAG, "策略已暂停，返回Launcher主页")
+                Log.d(TAG, "策略已暂停，阻止延迟按键并返回Launcher主页")
+                isLeaving = true
+                handler.removeCallbacksAndMessages(null)
                 tvView?.reset()
                 finish()
             }
@@ -129,6 +132,18 @@ class HdmiActivity : Activity() {
         registerReceiver(policyPauseReceiver, IntentFilter("com.company.tvlauncher.POLICY_PAUSED"))
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val newInputId = resolveInputId()
+        if (newInputId != null && newInputId != currentInputId) {
+            currentInputId = newInputId
+            savedInputId = newInputId
+            hasTuned = false
+            Log.d(TAG, "onNewIntent - 输入变更: $currentInputId, 需要重新调谐")
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         Log.d(TAG, "onResume - 当前输入: $currentInputId, hasTuned=$hasTuned, hasFocus=$hasFocus")
@@ -151,7 +166,11 @@ class HdmiActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
-        Log.d(TAG, "onPause")
+        Log.d(TAG, "onPause - 标记离开，取消待发送按键事件")
+        isLeaving = true
+        hasTuned = false
+        handler.removeCallbacksAndMessages(null)
+        tvView?.reset()
     }
 
     override fun onSaveInstanceState(outState: android.os.Bundle) {
@@ -397,6 +416,10 @@ class HdmiActivity : Activity() {
     private fun scheduleConfirmDialog() {
         // 第1步：1秒后发送确认键
         handler.postDelayed({
+            if (isLeaving) {
+                Log.d(TAG, "已离开HdmiActivity，跳过确认键")
+                return@postDelayed
+            }
             try {
                 Log.d(TAG, "发送DPAD_CENTER确认HDMI弹窗")
                 Runtime.getRuntime().exec(arrayOf("input", "keyevent", "KEYCODE_DPAD_CENTER"))
@@ -406,6 +429,10 @@ class HdmiActivity : Activity() {
 
             // 第2步：确认后0.5秒，发送RIGHT+CENTER关闭残留通知
             handler.postDelayed({
+                if (isLeaving) {
+                    Log.d(TAG, "已离开HdmiActivity，跳过关闭通知按键")
+                    return@postDelayed
+                }
                 try {
                     Log.d(TAG, "发送DPAD_RIGHT+DPAD_CENTER关闭残留通知")
                     Runtime.getRuntime().exec(arrayOf("input", "keyevent", "KEYCODE_DPAD_RIGHT"))

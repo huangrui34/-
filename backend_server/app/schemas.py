@@ -45,13 +45,6 @@ class DeviceHeartbeatIn(BaseModel):
     status: str = "ok"
     message: Optional[str] = None
 
-class WifiConfigIn(BaseModel):
-    ssid: str
-    security: str = "wpa2_psk"       # "open" | "wpa2_psk" | "wpa2_enterprise"
-    password: Optional[str] = None
-    identity: Optional[str] = None    # for wpa2_enterprise
-    hidden: bool = False
-
 class DeviceOut(BaseModel):
     id: int
     device_sn: str
@@ -76,7 +69,6 @@ class DeviceOut(BaseModel):
     online: bool
     policy_id: Optional[int]
     policy_paused: bool = False  # 策略暂停状态
-    wifi_config: Optional[str] = None  # JSON string or null
     class Config:
         from_attributes = True
 

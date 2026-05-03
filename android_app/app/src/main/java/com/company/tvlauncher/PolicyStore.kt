@@ -175,41 +175,4 @@ class PolicyStore(private val context: Context) {
 
         return hasChange
     }
-
-    // WiFi配置推送状态跟踪
-    fun getLastAppliedWifiConfig(): String? = prefs.getString("last_applied_wifi_config", null)
-
-    fun setLastAppliedWifiConfig(configJson: String?) {
-        if (configJson != null) {
-            prefs.edit().putString("last_applied_wifi_config", configJson).apply()
-        } else {
-            prefs.edit().remove("last_applied_wifi_config").apply()
-        }
-    }
-
-    fun getWifiRevertNetworkId(): Int = prefs.getInt("wifi_revert_network_id", -1)
-
-    fun setWifiRevertNetworkId(netId: Int) {
-        prefs.edit().putInt("wifi_revert_network_id", netId).apply()
-    }
-
-    fun isWifiSwitchInProgress(): Boolean = prefs.getBoolean("wifi_switch_in_progress", false)
-
-    fun setWifiSwitchInProgress(inProgress: Boolean) {
-        prefs.edit().putBoolean("wifi_switch_in_progress", inProgress).apply()
-    }
-
-    fun getWifiSwitchStartTime(): Long = prefs.getLong("wifi_switch_start_time", 0L)
-
-    fun setWifiSwitchStartTime(timeMs: Long) {
-        prefs.edit().putLong("wifi_switch_start_time", timeMs).apply()
-    }
-
-    fun clearWifiSwitchState() {
-        prefs.edit()
-            .remove("wifi_switch_in_progress")
-            .remove("wifi_switch_start_time")
-            .remove("wifi_revert_network_id")
-            .apply()
-    }
 }

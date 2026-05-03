@@ -1,5 +1,6 @@
 package com.company.tvlauncher
 
+import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -116,15 +117,8 @@ class KeepAliveForegroundService : Service() {
             override fun run() {
                 try {
                     if (policyStore.isPolicyPaused()) {
-                        // 策略暂停时，确保Launcher在前台（不要停留在投屏APP中）
-                        val prefs = getSharedPreferences("tv_policy", Context.MODE_PRIVATE)
-                        val isLauncherFg = prefs.getBoolean("launcher_foreground", true)
-                        if (!isLauncherFg) {
-                            android.util.Log.d(TAG, "策略已暂停，Launcher不在前台，切回主页")
-                            val intent = Intent(this@KeepAliveForegroundService, MainActivity::class.java)
-                            intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
-                            startActivity(intent)
-                        }
+                        // 策略暂停时：不强制拉回主页，让用户自由操作
+                        // 只更新通知栏状态
                         updateNotification()
                         handler.postDelayed(this, CHECK_INTERVAL_MS)
                         return
@@ -164,5 +158,28 @@ class KeepAliveForegroundService : Service() {
         }
 
         handler.postDelayed(keepAliveRunnable!!, 1000)
+    }
+
+    /**
+     * 检查我们自己的APP是否在前台（MainActivity/SettingsActivity/HdmiActivity等）
+     * 策略暂停时，只有用户在第三方APP中才需要拉回主页，在我们自己的APP内不干预
+     */
+    private fun isOurAppInForeground(): Boolean {
+        // 方法1：检查launcher_foreground标志（MainActivity设置）
+        val prefs = getSharedPreferences("tv_policy", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("launcher_foreground", true)) return true
+
+        // 方法2：通过getRunningTasks检查前台Activity是否属于我们的包
+        return try {
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val tasks = am.getRunningTasks(1)
+            if (tasks != null && tasks.isNotEmpty()) {
+                tasks[0].topActivity?.packageName == packageName
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            false
+        }
     }
 }

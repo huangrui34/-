@@ -179,10 +179,6 @@ class RemoteApi(
                     context.sendBroadcast(intent)
                 }
 
-                // WiFi配置推送处理
-                val wifiConfigJson = json.optJSONObject("wifi_config")
-                handleWifiConfig(wifiConfigJson)
-
                 return true
             }
         } catch (e: Exception) {
@@ -216,61 +212,5 @@ class RemoteApi(
             Settings.Secure.ANDROID_ID
         )
         return androidId ?: "tv-${System.currentTimeMillis()}"
-    }
-
-    private fun handleWifiConfig(wifiConfigJson: JSONObject?) {
-        if (wifiConfigJson == null) {
-            if (policyStore.isWifiSwitchInProgress()) {
-                checkWifiSwitchResult()
-            }
-            return
-        }
-
-        val configStr = wifiConfigJson.toString()
-        val lastApplied = policyStore.getLastAppliedWifiConfig()
-
-        if (configStr == lastApplied) {
-            android.util.Log.d("RemoteApi", "WiFi config unchanged, skipping")
-            return
-        }
-
-        android.util.Log.d("RemoteApi", "New WiFi config received: SSID=${wifiConfigJson.optString("ssid")}")
-
-        val wifiConfig = WifiConfig(
-            ssid = wifiConfigJson.optString("ssid", ""),
-            security = wifiConfigJson.optString("security", "wpa2_psk"),
-            password = wifiConfigJson.optString("password", null),
-            identity = wifiConfigJson.optString("identity", null),
-            hidden = wifiConfigJson.optBoolean("hidden", false)
-        )
-
-        if (wifiConfig.ssid.isBlank()) {
-            android.util.Log.w("RemoteApi", "WiFi config has empty SSID, ignoring")
-            return
-        }
-
-        val wifiManager = WifiConfigManager(context)
-        val previousNetId = wifiManager.saveCurrentWifiState()
-        policyStore.setWifiRevertNetworkId(previousNetId)
-
-        val newNetId = wifiManager.connectToWifi(wifiConfig)
-        if (newNetId == -1) {
-            android.util.Log.e("RemoteApi", "Failed to add WiFi config, reverting")
-            wifiManager.revertToNetwork(previousNetId)
-            return
-        }
-
-        policyStore.setWifiSwitchInProgress(true)
-        policyStore.setWifiSwitchStartTime(System.currentTimeMillis())
-        policyStore.setLastAppliedWifiConfig(configStr)
-        android.util.Log.d("RemoteApi", "WiFi switch initiated: SSID=${wifiConfig.ssid}")
-    }
-
-    private fun checkWifiSwitchResult() {
-        if (policyStore.isWifiSwitchInProgress()) {
-            val elapsed = System.currentTimeMillis() - policyStore.getWifiSwitchStartTime()
-            android.util.Log.d("RemoteApi", "WiFi switch verified after ${elapsed}ms")
-            policyStore.clearWifiSwitchState()
-        }
     }
 }

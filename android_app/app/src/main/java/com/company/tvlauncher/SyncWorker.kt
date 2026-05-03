@@ -37,19 +37,6 @@ class SyncWorker(
                 Log.d("SyncWorker", "Policy synced: ${policy.mode}")
                 Result.success()
             } else {
-                // 心跳失败 + WiFi切换进行中 = 新WiFi不可达，回退
-                if (policyStore.isWifiSwitchInProgress()) {
-                    val elapsed = System.currentTimeMillis() - policyStore.getWifiSwitchStartTime()
-                    if (elapsed > 10_000) {
-                        Log.w("SyncWorker", "Heartbeat failed after WiFi switch, reverting")
-                        val wifiManager = WifiConfigManager(applicationContext)
-                        wifiManager.revertToNetwork(policyStore.getWifiRevertNetworkId())
-                        policyStore.clearWifiSwitchState()
-                        policyStore.setLastAppliedWifiConfig(null)
-                    }
-                }
-                // 心跳失败：可能是服务器不可达，也可能是token失效（设备被移除）
-                // 清除token，下次SyncWorker运行时会重新注册
                 Log.w("SyncWorker", "心跳失败，清除token等待重新注册")
                 policyStore.clearDeviceToken()
                 Result.retry()

@@ -41,7 +41,6 @@ class Device(Base):
     token: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     policy_id: Mapped[int | None] = mapped_column(ForeignKey("policies.id"), nullable=True)
     policy_paused: Mapped[bool] = mapped_column(Boolean, default=False)  # 策略暂停状态
-    wifi_config: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: {ssid, security, password, identity, hidden}
     updated_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     policy = relationship("Policy")
 

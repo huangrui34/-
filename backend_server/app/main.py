@@ -16,7 +16,7 @@ from sqlalchemy import and_
 
 from .db import Base, engine, get_db
 from .models import Device, DeviceHeartbeat, Policy, OperationLog
-from .schemas import DeviceHeartbeatIn, DeviceOut, DeviceRegister, PolicyCreate, PolicyOut, OperationLogOut, WifiConfigIn
+from .schemas import DeviceHeartbeatIn, DeviceOut, DeviceRegister, PolicyCreate, PolicyOut, OperationLogOut
 
 Base.metadata.create_all(bind=engine)
 
@@ -32,7 +32,6 @@ def _migrate_db():
         'wifi_link_speed': 'INTEGER',
         'ping_latency': 'INTEGER',
         'ping_packet_loss': 'INTEGER',
-        'wifi_config': 'TEXT',
     }
     with engine.connect() as conn:
         for col_name, col_type in new_columns.items():
@@ -246,6 +245,11 @@ async def check_offline_devices():
             ).all()
             for d in stale_devices:
                 d.online = False
+                d.wifi_rssi = None
+                d.wifi_frequency = None
+                d.wifi_link_speed = None
+                d.ping_latency = None
+                d.ping_packet_loss = None
                 print(f"[离线检测] {d.device_name} 超过{OFFLINE_TIMEOUT_MINUTES}分钟无心跳，标记为离线")
             if stale_devices:
                 db.commit()
@@ -351,13 +355,6 @@ def device_heartbeat(
     db.commit()
     db.refresh(device)
     policy = device.policy
-    # Parse wifi_config JSON for heartbeat response
-    wifi_config_obj = None
-    if device.wifi_config:
-        try:
-            wifi_config_obj = json.loads(device.wifi_config)
-        except Exception:
-            wifi_config_obj = None
     return {
         "policy": {
             "mode": policy.mode if policy else None,
@@ -366,8 +363,7 @@ def device_heartbeat(
             "fallback_mode": policy.fallback_mode if policy else None,
             "fallback_value": policy.fallback_value if policy else None,
         },
-        "policy_paused": device.policy_paused,
-        "wifi_config": wifi_config_obj
+        "policy_paused": device.policy_paused
     }
 
 def push_policy_update_to_device(device: Device, db: Session, action_type: str = "policy_update"):
@@ -623,37 +619,6 @@ def bind_policy(device_id: int, policy_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         log_operation(db, "policy_push_failed", f"推送失败: {str(e)}", device_id, device.device_name)
 
-    return {"ok": True}
-
-@app.post("/api/v1/devices/{device_id}/wifi-config")
-def set_wifi_config(device_id: int, payload: WifiConfigIn, db: Session = Depends(get_db)):
-    device = db.query(Device).filter(Device.id == device_id).first()
-    if not device:
-        raise HTTPException(status_code=404, detail="设备未找到")
-    if payload.security == "wpa2_psk" and (not payload.password or payload.password.strip() == ""):
-        raise HTTPException(status_code=400, detail="WPA2-PSK需要输入密码")
-    if payload.security == "wpa2_enterprise":
-        if not payload.identity or payload.identity.strip() == "":
-            raise HTTPException(status_code=400, detail="WPA2-Enterprise需要输入用户名(Identity)")
-        if not payload.password or payload.password.strip() == "":
-            raise HTTPException(status_code=400, detail="WPA2-Enterprise需要输入密码")
-    device.wifi_config = json.dumps(payload.model_dump(), ensure_ascii=False)
-    db.commit()
-    log_operation(db, "set_wifi_config",
-        f"设备 {device.device_name} WiFi配置已设置: SSID={payload.ssid}, 安全={payload.security}",
-        device_id, device.device_name)
-    return {"ok": True}
-
-@app.delete("/api/v1/devices/{device_id}/wifi-config")
-def clear_wifi_config(device_id: int, db: Session = Depends(get_db)):
-    device = db.query(Device).filter(Device.id == device_id).first()
-    if not device:
-        raise HTTPException(status_code=404, detail="设备未找到")
-    device.wifi_config = None
-    db.commit()
-    log_operation(db, "clear_wifi_config",
-        f"设备 {device.device_name} WiFi配置已清除",
-        device_id, device.device_name)
     return {"ok": True}
 
 @app.post("/api/v1/devices/{device_id}/room")
@@ -1684,6 +1649,12 @@ def connectivity_check(db: Session = Depends(get_db)):
         new_online = conn["ping"]
         if device.online != new_online:
             device.online = new_online
+            if not new_online:
+                device.wifi_rssi = None
+                device.wifi_frequency = None
+                device.wifi_link_speed = None
+                device.ping_latency = None
+                device.ping_packet_loss = None
             updated = True
             print(f"[连通性检测] {device.device_name} online: {device.online} -> {new_online}")
     if updated:

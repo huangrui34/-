@@ -34,6 +34,12 @@ class MainActivity : AppCompatActivity() {
     private var lastPolicyExecutionTime = 0L
     private val EXECUTION_COOLDOWN = 5000L // 5 seconds cooldown to prevent loops
 
+    // HDMI暂停切换时的按键屏蔽期：HdmiActivity的scheduleConfirmDialog通过
+    // Runtime.exec发送的按键是异步的，可能在Activity切换后才注入，
+    // 需要短暂屏蔽DPAD按键防止误触设置按钮
+    private var hdmiPauseTransitionTime = 0L
+    private val HDMI_PAUSE_KEY_SUPPRESS_MS = 5000L
+
     // 保活检查的Handler和Runnable
     private var keepAliveHandler: Handler? = null
     private var keepAliveRunnable: Runnable? = null
@@ -187,16 +193,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun bringLauncherToFront() {
-        // 暂停策略时：关闭HDMI画面，把Launcher带到前台
-        try {
-            // 如果HdmiActivity在前台，先关掉它
-            val hdmiIntent = Intent(this, HdmiActivity::class.java)
-            hdmiIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            hdmiIntent.putExtra("finish", true)
-            startActivity(hdmiIntent)
-        } catch (_: Exception) {}
-
-        // 把Launcher自身带到前台
+        // 暂停策略时：把Launcher带到前台
+        // HdmiActivity由它自己的policyPauseReceiver接收广播后自行关闭
+        // 设置屏蔽期防止onResume中的策略执行重新启动HdmiActivity
+        hdmiPauseTransitionTime = System.currentTimeMillis()
         val launcherIntent = Intent(this, MainActivity::class.java)
         launcherIntent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         startActivity(launcherIntent)
@@ -379,7 +379,7 @@ class MainActivity : AppCompatActivity() {
             addView(input, params)
         }
 
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("管理锁")
             .setMessage("输入密码以进入设置")
             .setView(container)
@@ -390,7 +390,17 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             .setNegativeButton("取消", null)
-            .show()
+            .create()
+
+        dialog.setOnShowListener {
+            // 弹窗显示后立即让EditText获取焦点和键盘焦点，防止被按钮抢走
+            input.requestFocus()
+            input.post {
+                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+                imm?.showSoftInput(input, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+            }
+        }
+        dialog.show()
     }
 
     override fun onResume() {
@@ -403,6 +413,12 @@ class MainActivity : AppCompatActivity() {
         val policyStore = PolicyStore(this)
         refreshStatus(policyStore)
 
+        // 检测HDMI暂停切换：策略暂停+HDMI模式=从HdmiActivity切回，需要屏蔽按键
+        if (policyStore.isPolicyPaused() && policyStore.getPolicy().mode == "hdmi") {
+            hdmiPauseTransitionTime = System.currentTimeMillis()
+            android.util.Log.d("MainActivity", "HDMI暂停切换，启用按键屏蔽期3秒")
+        }
+
         // 启动前台服务，防止被系统清理
         val foregroundIntent = Intent(this, KeepAliveForegroundService::class.java)
         startService(foregroundIntent)
@@ -410,10 +426,15 @@ class MainActivity : AppCompatActivity() {
         val now = System.currentTimeMillis()
         val policy = policyStore.getPolicy()
 
+        // HDMI暂停切换屏蔽期内不执行策略，防止HdmiActivity刚关又被重新启动
+        val inHdmiPauseTransition = hdmiPauseTransitionTime > 0 &&
+            now - hdmiPauseTransitionTime < HDMI_PAUSE_KEY_SUPPRESS_MS
+
         // 立即执行策略，不等待网络I/O
         // 开机时网络未就绪，等网络会浪费数秒黑屏时间
         if (isPolicyValid(policy) && !policyStore.isPolicyPaused()
             && !policyStore.isEscapeModeActive()
+            && !inHdmiPauseTransition
             && now - lastPolicyExecutionTime > EXECUTION_COOLDOWN) {
             android.util.Log.d("MainActivity", "${policy.mode}模式：立即执行策略，不等待网络")
             lastPolicyExecutionTime = now
@@ -475,6 +496,22 @@ class MainActivity : AppCompatActivity() {
         if (isPolicyValid(policy)) {
             startKeepAliveService(policy)
         }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // HDMI暂停切换屏蔽期：阻止异步注入的DPAD按键误触设置按钮
+        // 必须在dispatchKeyEvent中拦截，这是最早的事件分发点
+        val timeSinceTransition = System.currentTimeMillis() - hdmiPauseTransitionTime
+        if (hdmiPauseTransitionTime > 0 && timeSinceTransition < HDMI_PAUSE_KEY_SUPPRESS_MS) {
+            val kc = event.keyCode
+            if (kc == KeyEvent.KEYCODE_DPAD_CENTER || kc == KeyEvent.KEYCODE_DPAD_RIGHT
+                || kc == KeyEvent.KEYCODE_DPAD_LEFT || kc == KeyEvent.KEYCODE_DPAD_UP
+                || kc == KeyEvent.KEYCODE_ENTER) {
+                android.util.Log.d("MainActivity", "HDMI暂停屏蔽期内(${timeSinceTransition}ms)，拦截DPAD按键$kc action=${event.action}")
+                return true
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
