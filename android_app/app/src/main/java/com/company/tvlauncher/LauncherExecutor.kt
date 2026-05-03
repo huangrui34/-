@@ -264,80 +264,84 @@ class LauncherExecutor(private val context: Context) {
     }
 
     /**
-     * 切换到HDMI输入 - 使用Intent和模拟按键
+     * 切换到HDMI输入 - 使用HdmiActivity + TvView API
+     *
+     * 方式1: 启动HdmiActivity，使用TvView直接调谐到HDMI输入
+     *   这是Android TV标准的HDMI切换方式，通过TvInputManager/TvView与
+     *   HdmiInputService建立会话，直接显示HDMI信号。
+     *   支持精确指定HDMI1/HDMI2/HDMI3端口。
+     *   已适配4种芯片平台: Amlogic/Droidlogic, MediaTek, MStar, Realtek
+     *
+     * 方式2: SETUP_INPUTS Intent (Android 9+备用)
+     * 方式3: 小米电视专用 EXTSRC_PLAY (备用)
+     * 方式4: 通过tvplayer启动 (兜底)
      */
     private fun switchToHdmi(port: Int) {
         android.util.Log.d(TAG, "========== 开始切换到HDMI$port ==========")
 
+        // 方式1: 启动HdmiActivity (TvView API方式)
+        // HdmiActivity内部会自动检测芯片类型，选择正确的inputId
         try {
-            // 方法1: 使用Intent直接启动外部信号源选择界面
-            android.util.Log.d(TAG, "方法1: 使用Intent打开信号源选择界面")
-
-            try {
-                val intent = Intent("com.xiaomi.mitv.tvplayer.EXTSRC_PLAY")
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-                android.util.Log.d(TAG, "Intent启动成功")
-            } catch (e: Exception) {
-                android.util.Log.w(TAG, "Intent启动失败: ${e.message}")
-                // 尝试备用方法
-                val intent = context.packageManager.getLaunchIntentForPackage(HDMI_TV_PLAYER_PACKAGE)
-                if (intent != null) {
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    context.startActivity(intent)
-                }
-            }
-
-            // 等待界面打开
-            Thread.sleep(2500)
-
-            // 检查当前焦点
-            val currentPackage = getCurrentFocusPackage()
-            android.util.Log.d(TAG, "当前焦点应用: $currentPackage")
-
-            if (currentPackage?.contains("tvplayer") == true || currentPackage?.contains("External") == true) {
-                android.util.Log.d(TAG, "信号源选择界面已打开，开始导航到HDMI$port")
-
-                // 使用方向键导航到指定HDMI输入
-                // 小米电视信号源列表：通常第一行是TV/DTV，然后是HDMI1, HDMI2, HDMI3等
-
-                // 先按几次UP确保在最顶部
-                for (i in 1..5) {
-                    Runtime.getRuntime().exec(arrayOf("input", "keyevent", "19")).waitFor()  // DPAD_UP
-                    Thread.sleep(150)
-                }
-                Thread.sleep(500)
-
-                // 向下导航：HDMI1通常是第2个选项（TV之后）
-                val downCount = port  // HDMI1: 1次, HDMI2: 2次, HDMI3: 3次
-                for (i in 1..downCount) {
-                    Runtime.getRuntime().exec(arrayOf("input", "keyevent", "20")).waitFor()  // DPAD_DOWN
-                    Thread.sleep(200)
-                }
-
-                Thread.sleep(500)
-
-                // 确认选择
-                Runtime.getRuntime().exec(arrayOf("input", "keyevent", "23")).waitFor()  // DPAD_CENTER
-                android.util.Log.d(TAG, "已确认选择HDMI$port")
-
-                Thread.sleep(1500)
-
-                // 验证结果
-                val finalPackage = getCurrentFocusPackage()
-                android.util.Log.d(TAG, "HDMI切换完成，当前焦点: $finalPackage")
-                android.util.Log.d(TAG, "========== HDMI$port 切换完成 ==========")
-                return
-            }
-
-            android.util.Log.w(TAG, "信号源界面未打开，尝试备用方法")
-
+            android.util.Log.d(TAG, "方式1: 启动HdmiActivity，port=$port")
+            val intent = Intent(context, HdmiActivity::class.java)
+            intent.putExtra(HdmiActivity.EXTRA_HDMI_PORT, port)
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+            android.util.Log.d(TAG, "HdmiActivity已启动")
+            android.util.Log.d(TAG, "========== HDMI$port 切换完成(HdmiActivity) ==========")
+            return
         } catch (e: Exception) {
-            android.util.Log.e(TAG, "HDMI切换异常: ${e.message}")
-            e.printStackTrace()
+            android.util.Log.w(TAG, "方式1失败(HdmiActivity): ${e.message}")
         }
 
-        android.util.Log.d(TAG, "========== HDMI切换流程结束 ==========")
+        // 方式2: SETUP_INPUTS Intent (Android 9+)
+        try {
+            // 构造Droidlogic inputId用于SETUP_INPUTS备用方案
+            val droidlogicInputId = when (port) {
+                1 -> "com.droidlogic.tvinput/.services.Hdmi1InputService/HW5"
+                2 -> "com.droidlogic.tvinput/.services.Hdmi2InputService/HW6"
+                3 -> "com.droidlogic.tvinput/.services.Hdmi3InputService/HW7"
+                else -> "com.droidlogic.tvinput/.services.Hdmi1InputService/HW5"
+            }
+            android.util.Log.d(TAG, "方式2: 使用SETUP_INPUTS切换: $droidlogicInputId")
+            val intent = Intent("android.media.tv.action.SETUP_INPUTS")
+            intent.putExtra("from_tv_source", true)
+            intent.putExtra("android.media.tv.extra.INPUT_ID", droidlogicInputId)
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+            android.util.Log.d(TAG, "========== HDMI$port 切换完成(SETUP_INPUTS) ==========")
+            return
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "方式2失败(SETUP_INPUTS): ${e.message}")
+        }
+
+        // 方式3: 小米电视专用 EXTSRC_PLAY
+        try {
+            android.util.Log.d(TAG, "方式3: 使用小米EXTSRC_PLAY切换")
+            val intent = Intent("com.xiaomi.mitv.tvplayer.EXTSRC_PLAY")
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+            android.util.Log.d(TAG, "========== HDMI$port 切换完成(EXTSRC) ==========")
+            return
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "方式3失败(EXTSRC): ${e.message}")
+        }
+
+        // 方式4: 启动tvplayer
+        try {
+            android.util.Log.d(TAG, "方式4: 启动tvplayer")
+            val intent = context.packageManager.getLaunchIntentForPackage(HDMI_TV_PLAYER_PACKAGE)
+            if (intent != null) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+                android.util.Log.d(TAG, "========== HDMI$port 切换完成(tvplayer) ==========")
+                return
+            }
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "方式4失败(tvplayer): ${e.message}")
+        }
+
+        android.util.Log.e(TAG, "========== 所有HDMI切换方式均失败 ==========")
     }
 
     private fun launchByIntent(packageName: String): Boolean {

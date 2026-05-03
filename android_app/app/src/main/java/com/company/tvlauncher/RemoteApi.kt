@@ -70,40 +70,44 @@ class RemoteApi(
 
     fun registerIfNeeded(deviceName: String, network: TvNetworkInfo): Boolean {
         if (policyStore.getDeviceToken() != null) return true
-        val sn = resolveSerial()
-        policyStore.setDeviceSn(sn)
-        val base = policyStore.getServerBaseUrl()
-        
-        // Auto-naming: Use MAC address if deviceName is generic or blank
-        val finalName = if (deviceName == "MeetingTV" || deviceName.isBlank()) {
-            val macTail = network.wifiMac.replace(":", "").takeLast(4).ifBlank { 
-                network.ethMac.replace(":", "").takeLast(4) 
-            }
-            "TV-$macTail"
-        } else {
-            deviceName
-        }
+        try {
+            val sn = resolveSerial()
+            policyStore.setDeviceSn(sn)
+            val base = policyStore.getServerBaseUrl()
 
-        val body = JSONObject()
-            .put("device_sn", sn)
-            .put("device_name", finalName)
-            .put("model_name", Build.MODEL)
-            .put("wifi_mac", network.wifiMac)
-            .put("eth_mac", network.ethMac)
-            .toString()
-            .toRequestBody(jsonMedia)
-        val req = Request.Builder()
-            .url("$base/api/v1/devices/register")
-            .post(body)
-            .build()
-        client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) return false
-            val json = JSONObject(resp.body?.string() ?: return false)
-            val token = json.optString("token", "")
-            if (token.isNotBlank()) {
-                policyStore.setDeviceToken(token)
-                return true
+            // Auto-naming: Use MAC address if deviceName is generic or blank
+            val finalName = if (deviceName == "MeetingTV" || deviceName.isBlank()) {
+                val macTail = network.wifiMac.replace(":", "").takeLast(4).ifBlank {
+                    network.ethMac.replace(":", "").takeLast(4)
+                }
+                "TV-$macTail"
+            } else {
+                deviceName
             }
+
+            val body = JSONObject()
+                .put("device_sn", sn)
+                .put("device_name", finalName)
+                .put("model_name", Build.MODEL)
+                .put("wifi_mac", network.wifiMac)
+                .put("eth_mac", network.ethMac)
+                .toString()
+                .toRequestBody(jsonMedia)
+            val req = Request.Builder()
+                .url("$base/api/v1/devices/register")
+                .post(body)
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return false
+                val json = JSONObject(resp.body?.string() ?: return false)
+                val token = json.optString("token", "")
+                if (token.isNotBlank()) {
+                    policyStore.setDeviceToken(token)
+                    return true
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("RemoteApi", "注册请求失败: ${e.message}")
         }
         return false
     }
@@ -122,6 +126,11 @@ class RemoteApi(
             .put("installed_apps", appsJson)
             .put("ram_usage", getRamUsage())
             .put("storage_usage", getStorageUsage())
+            .put("wifi_rssi", network.wifiRssi)
+            .put("wifi_frequency", network.wifiFrequency)
+            .put("wifi_link_speed", network.wifiLinkSpeed)
+            .put("ping_latency", network.pingLatency)
+            .put("ping_packet_loss", network.pingPacketLoss)
             .put("status", "ok")
             .toString()
             .toRequestBody(jsonMedia)
@@ -130,38 +139,55 @@ class RemoteApi(
             .header("X-Device-Token", token)
             .post(body)
             .build()
-        client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) return false
-            val json = JSONObject(resp.body?.string() ?: return false)
-            val policy = json.optJSONObject("policy") ?: return true
-            val mode = policy.optString("mode", "")
-            val app = policy.optString("target_app_package", "")
-            val hdmi = if (policy.has("target_hdmi_port") && !policy.isNull("target_hdmi_port")) {
-                policy.getInt("target_hdmi_port")
-            } else {
-                null
+        try {
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return false
+                val json = JSONObject(resp.body?.string() ?: return false)
+                val policy = json.optJSONObject("policy") ?: return true
+                val mode = policy.optString("mode", "")
+                val app = policy.optString("target_app_package", "")
+                val hdmi = if (policy.has("target_hdmi_port") && !policy.isNull("target_hdmi_port")) {
+                    policy.getInt("target_hdmi_port")
+                } else {
+                    null
+                }
+
+                // 应用远程策略，返回是否发生变化
+                val policyChanged = policyStore.applyRemotePolicy(
+                    mode = mode.ifBlank { null },
+                    targetApp = app.ifBlank { null },
+                    hdmiPort = hdmi
+                )
+
+                // 检查策略暂停状态
+                val policyPaused = json.optBoolean("policy_paused", false)
+                val wasPaused = policyStore.isPolicyPaused()
+                android.util.Log.d("RemoteApi", "心跳同步: policy_paused=$policyPaused, was=$wasPaused")
+                policyStore.setPolicyPaused(policyPaused)
+
+                // 暂停状态变化时发送广播
+                if (wasPaused != policyPaused) {
+                    val action = if (policyPaused) "com.company.tvlauncher.POLICY_PAUSED" else "com.company.tvlauncher.POLICY_RESUMED"
+                    android.util.Log.d("RemoteApi", "暂停状态变化，发送广播: $action")
+                    context.sendBroadcast(android.content.Intent(action))
+                }
+
+                // 只有策略真正变化时才发送广播，避免重复执行
+                if (policyChanged && mode.isNotBlank()) {
+                    android.util.Log.d("RemoteApi", "策略已变化，发送更新广播")
+                    val intent = android.content.Intent("com.company.tvlauncher.POLICY_UPDATED")
+                    context.sendBroadcast(intent)
+                }
+
+                // WiFi配置推送处理
+                val wifiConfigJson = json.optJSONObject("wifi_config")
+                handleWifiConfig(wifiConfigJson)
+
+                return true
             }
-
-            // 应用远程策略，返回是否发生变化
-            val policyChanged = policyStore.applyRemotePolicy(
-                mode = mode.ifBlank { null },
-                targetApp = app.ifBlank { null },
-                hdmiPort = hdmi
-            )
-
-            // 检查策略暂停状态
-            val policyPaused = json.optBoolean("policy_paused", false)
-            android.util.Log.d("RemoteApi", "心跳同步: policy_paused=$policyPaused")
-            policyStore.setPolicyPaused(policyPaused)
-
-            // 只有策略真正变化时才发送广播，避免重复执行
-            if (policyChanged && mode.isNotBlank()) {
-                android.util.Log.d("RemoteApi", "策略已变化，发送更新广播")
-                val intent = android.content.Intent("com.company.tvlauncher.POLICY_UPDATED")
-                context.sendBroadcast(intent)
-            }
-
-            return true
+        } catch (e: Exception) {
+            android.util.Log.w("RemoteApi", "心跳请求失败: ${e.message}")
+            return false
         }
     }
 
@@ -190,5 +216,61 @@ class RemoteApi(
             Settings.Secure.ANDROID_ID
         )
         return androidId ?: "tv-${System.currentTimeMillis()}"
+    }
+
+    private fun handleWifiConfig(wifiConfigJson: JSONObject?) {
+        if (wifiConfigJson == null) {
+            if (policyStore.isWifiSwitchInProgress()) {
+                checkWifiSwitchResult()
+            }
+            return
+        }
+
+        val configStr = wifiConfigJson.toString()
+        val lastApplied = policyStore.getLastAppliedWifiConfig()
+
+        if (configStr == lastApplied) {
+            android.util.Log.d("RemoteApi", "WiFi config unchanged, skipping")
+            return
+        }
+
+        android.util.Log.d("RemoteApi", "New WiFi config received: SSID=${wifiConfigJson.optString("ssid")}")
+
+        val wifiConfig = WifiConfig(
+            ssid = wifiConfigJson.optString("ssid", ""),
+            security = wifiConfigJson.optString("security", "wpa2_psk"),
+            password = wifiConfigJson.optString("password", null),
+            identity = wifiConfigJson.optString("identity", null),
+            hidden = wifiConfigJson.optBoolean("hidden", false)
+        )
+
+        if (wifiConfig.ssid.isBlank()) {
+            android.util.Log.w("RemoteApi", "WiFi config has empty SSID, ignoring")
+            return
+        }
+
+        val wifiManager = WifiConfigManager(context)
+        val previousNetId = wifiManager.saveCurrentWifiState()
+        policyStore.setWifiRevertNetworkId(previousNetId)
+
+        val newNetId = wifiManager.connectToWifi(wifiConfig)
+        if (newNetId == -1) {
+            android.util.Log.e("RemoteApi", "Failed to add WiFi config, reverting")
+            wifiManager.revertToNetwork(previousNetId)
+            return
+        }
+
+        policyStore.setWifiSwitchInProgress(true)
+        policyStore.setWifiSwitchStartTime(System.currentTimeMillis())
+        policyStore.setLastAppliedWifiConfig(configStr)
+        android.util.Log.d("RemoteApi", "WiFi switch initiated: SSID=${wifiConfig.ssid}")
+    }
+
+    private fun checkWifiSwitchResult() {
+        if (policyStore.isWifiSwitchInProgress()) {
+            val elapsed = System.currentTimeMillis() - policyStore.getWifiSwitchStartTime()
+            android.util.Log.d("RemoteApi", "WiFi switch verified after ${elapsed}ms")
+            policyStore.clearWifiSwitchState()
+        }
     }
 }

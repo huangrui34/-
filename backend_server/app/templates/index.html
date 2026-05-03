@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Meeting TV Launcher 控制台</title>
     <style>
+        @keyframes deployPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(46,117,182,0.4); }
+            50% { box-shadow: 0 0 0 6px rgba(46,117,182,0); }
+        }
+        .deploy-step-active-icon {
+            animation: deployPulse 1.5s infinite;
+        }
         :root {
             --blue: #2563eb;
             --blue-light: #eff6ff;
@@ -923,14 +930,14 @@
                 <!-- 一键部署 -->
                 <div class="header-input-group">
                     <input type="text" id="deployIp" placeholder="电视 IP 地址">
-                    <button class="btn btn-success" style="border-radius: 0 6px 6px 0;" onclick="remoteDeploy()">一键部署上线</button>
+                    <button class="btn btn-success" style="border-radius: 0 6px 6px 0;" onclick="showDeployGuide()">一键部署上线</button>
                 </div>
-                <!-- Scrcpy 快速连接 -->
+                <!-- 远程连接 -->
                 <div class="header-input-group">
                     <input type="text" id="scrcpyIpTop" placeholder="电视IP" style="width: 130px;">
                     <div class="input-divider"></div>
                     <input type="text" id="scrcpyPortTop" value="5555" style="width: 52px; text-align: center;">
-                    <button class="btn" style="border-radius: 0 6px 6px 0; background: var(--indigo);" onclick="scrcpyConnectByIpTop()">Scrcpy 连接</button>
+                    <button class="btn" style="border-radius: 0 6px 6px 0; background: var(--indigo);" onclick="scrcpyConnectByIpTop()">远程连接</button>
                 </div>
                 <!-- ADB控制台 -->
                 <button class="btn" style="background: var(--gray-600);" onclick="openAdbConsole()">ADB 控制台</button>
@@ -1183,6 +1190,9 @@
     <div id="appModal" class="modal">
         <div class="modal-content" style="width: 650px;">
             <h3 id="appModalTitle">应用管理</h3>
+            <div style="background: #FFF3CD; border: 1px solid #FFEEBA; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px; color: #856404;">
+                本功能需要电视开启ADB调试。停用系统应用为危险操作，需二次确认。
+            </div>
             <div id="appList" style="max-height: 350px; overflow-y: auto; border: 1px solid #e5e5ea; border-radius: 6px; margin: 20px 0; background: #fff;"></div>
             <div class="install-section">
                 <h4>安装新应用</h4>
@@ -1194,11 +1204,27 @@
             <div class="install-section">
                 <div class="silent-upgrade-row">
                     <button class="btn" style="background: var(--orange);" onclick="silentUpgrade()">静默升级管理应用</button>
-                    <span class="silent-upgrade-hint">覆盖安装最新版APP，不影响电视当前操作，安装后自动重启</span>
+                    <span class="silent-upgrade-hint">将最新构建的APP覆盖安装到电视，不影响当前操作，安装后自动重启</span>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-outline" onclick="closeAppModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Danger Confirm Modal -->
+    <div id="dangerConfirmModal" class="modal">
+        <div class="modal-content" style="width: 420px;">
+            <h3 style="color: var(--red);">⚠️ 危险操作确认</h3>
+            <div id="dangerConfirmMsg" style="margin: 16px 0; font-size: 14px; line-height: 1.6;"></div>
+            <div style="margin: 12px 0;">
+                <div style="font-size: 13px; color: var(--gray-600); margin-bottom: 6px;">请输入 <strong style="color:var(--red);">确认停用</strong> 以继续：</div>
+                <input type="text" id="dangerConfirmInput" style="width: 100%; padding: 8px 12px; border: 1px solid #e5e5ea; border-radius: 6px; font-size: 14px;" placeholder="在此输入确认停用">
+            </div>
+            <div class="modal-footer" style="margin-top: 16px;">
+                <button class="btn btn-outline" onclick="closeDangerConfirm()">取消</button>
+                <button id="dangerConfirmBtn" class="btn btn-danger" onclick="executeDangerConfirm()" disabled>确认停用</button>
             </div>
         </div>
     </div>
@@ -1217,6 +1243,117 @@
         </div>
     </div>
 
+    <!-- WiFi Config Modal -->
+    <div id="wifiModal" class="modal">
+        <div class="modal-content" style="width: 480px;">
+            <h3 id="wifiModalTitle">推送WiFi配置</h3>
+            <div style="background: #D1ECF1; border: 1px solid #BEE5EB; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px; color: #0C5460;">
+                需要电视APP在线才能接收WiFi配置。有线网络的电视无法同时使用WiFi，推送后可能断开连接。
+            </div>
+            <div class="form-group">
+                <label>WiFi名称 (SSID) <span style="color:var(--red);">*</span></label>
+                <input type="text" id="wifiSsid" placeholder="输入WiFi名称">
+            </div>
+            <div class="form-group">
+                <label>安全类型</label>
+                <select id="wifiSecurity" onchange="toggleWifiFields()">
+                    <option value="wpa2_psk">WPA2-PSK (个人WiFi)</option>
+                    <option value="wpa2_enterprise">WPA2-Enterprise (企业WiFi)</option>
+                    <option value="open">开放网络 (无密码)</option>
+                </select>
+            </div>
+            <div id="wifiPasswordGroup" class="form-group">
+                <label>WiFi密码 <span style="color:var(--red);">*</span></label>
+                <input type="password" id="wifiPassword" placeholder="输入WiFi密码">
+            </div>
+            <div id="wifiIdentityGroup" class="form-group" style="display:none">
+                <label>用户名 (Identity) <span style="color:var(--red);">*</span></label>
+                <input type="text" id="wifiIdentity" placeholder="输入企业WiFi用户名">
+            </div>
+            <div class="form-group">
+                <label style="display:flex; align-items:center; gap:8px;">
+                    <input type="checkbox" id="wifiHidden" style="width:auto;">
+                    隐藏网络 (SSID不可见)
+                </label>
+            </div>
+            <div id="wifiCurrentStatus" style="margin-bottom:12px; font-size:12px; color:var(--gray-500);"></div>
+            <div class="modal-footer">
+                <button class="btn btn-danger btn-outline" id="wifiClearBtn" onclick="clearWifiConfig()" style="display:none;">清除配置</button>
+                <button class="btn btn-outline" onclick="closeWifiModal()">取消</button>
+                <button class="btn" onclick="saveWifiConfig()">推送</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Deploy Guide Modal -->
+    <div id="deployModal" class="modal">
+        <div class="modal-content" style="width: 620px; max-height: 90vh; overflow-y: auto;">
+            <h3>一键部署上线</h3>
+            <div id="deployDeviceName" style="color:#888; font-size:13px; margin-bottom:12px;"></div>
+
+            <div id="deployStep0" style="background:#fff3cd; border:1px solid #ffc107; border-radius:6px; padding:12px; margin-bottom:12px;">
+                <div style="font-weight:bold; color:#856404; margin-bottom:8px;">前置条件（必须先完成！）</div>
+                <div style="font-size:13px; color:#856404; line-height:1.8;">
+                    <b>1. 电视开启ADB调试</b><br>
+                    <span style="color:#666;">路径：设置 → 账号与安全 → ADB调试 → 开启</span><br>
+                    <span style="color:#666;">部分型号：设置 → 关于 → 连续点击「版本号」7次 → 返回设置 → 开发者选项 → ADB调试</span><br><br>
+                    <b>2. 确保电脑和电视在同一网络</b><br>
+                    <span style="color:#666;">电脑能ping通电视IP即可</span><br><br>
+                    <b>3. 首次连接需在电视上点击「允许」</b><br>
+                    <span style="color:#666;">点击部署后，电视上会弹出「是否允许USB调试」对话框，<b>请勾选「始终允许」并点击「允许」</b></span>
+                </div>
+            </div>
+
+            <div id="deploySteps" style="font-size:13px;">
+                <div id="deployStep0" style="padding:10px 0; border-bottom:1px solid #eee;">
+                    <div style="display:flex; align-items:center;">
+                        <span id="deployStep0Icon" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#ddd;color:#fff;font-size:12px;font-weight:bold;">1</span>
+                        <span style="margin-left:8px; font-weight:bold;">连接ADB并授权</span>
+                    </div>
+                    <div id="deployStep0Status" style="margin-left:32px; margin-top:4px; font-size:12px; color:#aaa; min-height:18px;">等待开始</div>
+                </div>
+                <div id="deployStep1" style="padding:10px 0; border-bottom:1px solid #eee;">
+                    <div style="display:flex; align-items:center;">
+                        <span id="deployStep1Icon" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#ddd;color:#fff;font-size:12px;font-weight:bold;">2</span>
+                        <span style="margin-left:8px; font-weight:bold;">安装管控APP</span>
+                    </div>
+                    <div id="deployStep1Status" style="margin-left:32px; margin-top:4px; font-size:12px; color:#aaa; min-height:18px;">等待开始</div>
+                </div>
+                <div id="deployStep2" style="padding:10px 0; border-bottom:1px solid #eee;">
+                    <div style="display:flex; align-items:center;">
+                        <span id="deployStep2Icon" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#ddd;color:#fff;font-size:12px;font-weight:bold;">3</span>
+                        <span style="margin-left:8px; font-weight:bold;">卸载预装应用</span>
+                    </div>
+                    <div id="deployStep2Status" style="margin-left:32px; margin-top:4px; font-size:12px; color:#aaa; min-height:18px;">等待开始</div>
+                </div>
+                <div id="deployStep3" style="padding:10px 0; border-bottom:1px solid #eee;">
+                    <div style="display:flex; align-items:center;">
+                        <span id="deployStep3Icon" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#ddd;color:#fff;font-size:12px;font-weight:bold;">4</span>
+                        <span style="margin-left:8px; font-weight:bold;">配置并启动</span>
+                    </div>
+                    <div id="deployStep3Status" style="margin-left:32px; margin-top:4px; font-size:12px; color:#aaa; min-height:18px;">等待开始</div>
+                </div>
+                <div id="deployStep4" style="padding:10px 0;">
+                    <div style="display:flex; align-items:center;">
+                        <span id="deployStep4Icon" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#ddd;color:#fff;font-size:12px;font-weight:bold;">5</span>
+                        <span style="margin-left:8px; font-weight:bold;">验证设备上线</span>
+                    </div>
+                    <div id="deployStep4Status" style="margin-left:32px; margin-top:4px; font-size:12px; color:#aaa; min-height:18px;">等待开始</div>
+                </div>
+            </div>
+
+            <div id="deployUserHint" style="display:none; margin-top:12px; background:#fff3cd; border:1px solid #ffc107; border-radius:6px; padding:10px 12px; font-size:13px; color:#856404; line-height:1.6;"></div>
+
+            <div id="deployLog" style="display:none; margin-top:12px; background:#f5f5f5; border-radius:4px; padding:8px; font-size:11px; max-height:150px; overflow-y:auto; font-family:monospace; white-space:pre-wrap;"></div>
+
+            <div class="modal-footer" style="margin-top:16px;">
+                <button class="btn btn-outline" onclick="closeDeployModal()">关闭</button>
+                <button id="deployBtn" class="btn" style="background:#27ae60;" onclick="startRemoteDeploy()">开始部署</button>
+                <a id="deployDocLink" href="/api/v1/deploy-guide" download style="margin-left:8px; font-size:12px; color:var(--blue);">下载部署文档</a>
+            </div>
+        </div>
+    </div>
+
     <script>
         let allInstalledApps = new Set();
         let allDevices = [];
@@ -1225,9 +1362,22 @@
         let currentRemoteDeviceId = null;
         let currentAppDeviceId = null;
         let currentRoomDeviceId = null;
+        let currentWifiDeviceId = null;
         let scrcpyCheckInterval = null;
         let adbScheduleInterval = null;
         let adbScheduleCount = 0;
+
+        // 策略下拉框保护：用户操作时暂停刷新，选择后保留本地值直到下发
+        let pendingSelections = {};
+
+        function isSelectActive() {
+            const ae = document.activeElement;
+            return ae && ae.tagName === 'SELECT' && ae.id && ae.id.startsWith('sel-');
+        }
+
+        function onPolicySelect(deviceId, value) {
+            pendingSelections[`sel-${deviceId}`] = value;
+        }
 
         // ===== Column filter & sort state =====
         let colSortState = {};   // { col: 'asc'|'desc'|null }
@@ -1235,8 +1385,14 @@
         let colFilterTemp = {};  // temp state while popup is open
 
         async function loadData() {
+            // 如果用户正在操作策略下拉框，跳过本次刷新
+            if (isSelectActive()) return;
+
             const policies = await (await fetch('/api/v1/policies')).json();
             const devices = await (await fetch('/api/v1/devices')).json();
+
+            // fetch完成后再次检查（fetch期间用户可能打开了下拉框）
+            if (isSelectActive()) return;
 
             allPolicies = policies;
             allDevices = devices;
@@ -1481,6 +1637,11 @@
 
             const policies = allPolicies;
             document.getElementById('deviceBody').innerHTML = filtered.map(d => {
+                // 如果这个设备的select正在被操作，保留当前select的值（不重建这一行的select）
+                const pendingKey = `sel-${d.id}`;
+                const selectedPolicyId = pendingSelections[pendingKey] !== undefined
+                    ? pendingSelections[pendingKey]
+                    : (d.policy_id || '');
                 let appTags = '';
                 if (d.installed_apps) {
                     try {
@@ -1516,15 +1677,16 @@
                         <div class="net-mac">${d.eth_mac ? 'MAC: ' + d.eth_mac : ''}</div>
                         <div style="margin-top:4px;"><span class="net-label">WiFi:</span> ${d.wifi_ip && d.wifi_ip !== '0.0.0.0' ? d.wifi_ip : '—'}</div>
                         <div class="net-mac">${d.wifi_mac ? 'MAC: ' + d.wifi_mac : ''}</div>
+                        ${renderWifiQuality(d)}
                     </td>
                     <td>
                         ${renderOnlineStatus(d)}
                     </td>
                     <td>
                         <div style="display: flex; align-items: center; gap: 8px;">
-                            <select id="sel-${d.id}" class="table-select">
+                            <select id="sel-${d.id}" class="table-select" onchange="onPolicySelect(${d.id}, this.value)">
                                 <option value="">未分配策略</option>
-                                ${policies.map(p => `<option value="${p.id}" ${d.policy_id === p.id ? 'selected' : ''}>${p.name}</option>`).join('')}
+                                ${policies.map(p => `<option value="${p.id}" ${selectedPolicyId == p.id ? 'selected' : ''}>${p.name}</option>`).join('')}
                             </select>
                             <button class="btn btn-info btn-sm" onclick="bindPolicy(${d.id})">更新</button>
                         </div>
@@ -1542,8 +1704,9 @@
                     </td>
                     <td>
                         <div class="action-btn-group">
-                            <button class="btn btn-info btn-sm" onclick="takeScreenshot(${d.id}, '${d.device_name}')">远程控制</button>
-                            <button class="btn btn-sm" style="background: var(--purple);" onclick="manageApps(${d.id}, '${d.device_name}')">应用管理</button>
+                            <button class="btn btn-info btn-sm" onclick="takeScreenshot(${d.id}, '${d.device_name}')" title="需要ADB连接">远程控制</button>
+                            <button class="btn btn-sm" style="background: var(--purple);" onclick="manageApps(${d.id}, '${d.device_name}')" title="需要ADB连接">应用管理</button>
+                            <button class="btn btn-sm" style="background: var(--indigo);" onclick="openWifiModal(${d.id}, '${d.device_name}')" title="需要APP在线">推送WiFi</button>
                             <button class="btn btn-danger btn-outline btn-sm" onclick="deleteDevice(${d.id})">移除</button>
                         </div>
                     </td>
@@ -1581,6 +1744,61 @@
             }
         }
 
+        function renderWifiQuality(d) {
+            const rssi = d.wifi_rssi;
+            const freq = d.wifi_frequency || 0;
+            const linkSpeed = d.wifi_link_speed || 0;
+            const latency = d.ping_latency;
+            const loss = d.ping_packet_loss;
+            const isEthernet = d.network_type === 'ethernet';
+
+            // Latency indicator (show for both WiFi and Ethernet)
+            let latencyHtml = '';
+            if (latency !== null && latency !== undefined && latency >= 0) {
+                let latColor = '#34c759';
+                if (latency > 50) latColor = '#ff9500';
+                if (latency > 100) latColor = '#ff3b30';
+                latencyHtml = `<span style="color:${latColor}; font-size:11px;">延迟${latency}ms</span>`;
+            }
+
+            // Packet loss indicator (show for both WiFi and Ethernet)
+            let lossHtml = '';
+            if (loss !== null && loss !== undefined && loss >= 0) {
+                let lossColor = '#34c759';
+                if (loss > 5) lossColor = '#ff9500';
+                if (loss > 15) lossColor = '#ff3b30';
+                lossHtml = `<span style="color:${lossColor}; font-size:11px; margin-left:6px;">丢包${loss}%</span>`;
+            }
+
+            // Ethernet: only show latency/loss
+            if (isEthernet) {
+                if (!latencyHtml && !lossHtml) return '';
+                return `<div style="margin-top:4px; border-top:1px dashed #ddd; padding-top:3px; text-align:center;">${latencyHtml}${lossHtml}</div>`;
+            }
+
+            // WiFi: show signal info + latency/loss
+            if (rssi === null || rssi === undefined) return '';
+            if (rssi <= -127) return ''; // Invalid RSSI, no WiFi connection
+
+            let signalColor, signalLabel;
+            if (rssi >= -50) { signalColor = '#34c759'; signalLabel = '优秀'; }
+            else if (rssi >= -60) { signalColor = '#8ac926'; signalLabel = '良好'; }
+            else if (rssi >= -70) { signalColor = '#ff9500'; signalLabel = '一般'; }
+            else { signalColor = '#ff3b30'; signalLabel = '弱'; }
+
+            const band = freq > 3000 ? '5GHz' : (freq > 0 ? '2.4GHz' : '');
+
+            const latLossHtml = (latencyHtml || lossHtml) ? `<div style="margin-top:2px; text-align:center;">${latencyHtml}${lossHtml}</div>` : '';
+
+            return `<div style="margin-top:4px; border-top:1px dashed #ddd; padding-top:3px;">
+                <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${signalColor}; margin-right:4px; vertical-align:middle;"></span>
+                <span style="font-size:11px; color:${signalColor};">${signalLabel}(${rssi}dBm)</span>
+                ${band ? `<span style="font-size:11px; color:#888; margin-left:4px;">${band}</span>` : ''}
+                ${linkSpeed ? `<span style="font-size:11px; color:#888; margin-left:4px;">${linkSpeed}Mbps</span>` : ''}
+                ${latLossHtml}
+            </div>`;
+        }
+
         function parseUsage(usageStr) {
             if (!usageStr || usageStr === 'N/A') return { percent: 0, color: '#e5e5ea' };
             try {
@@ -1596,6 +1814,218 @@
             } catch(e) { return { percent: 0, color: '#e5e5ea' }; }
         }
 
+        // One-click Deploy
+        let deployDeviceId = null;
+
+        function showDeployGuide() {
+            const ip = document.getElementById('deployIp').value.trim();
+            if (!ip) return alert('请先输入电视 IP 地址');
+
+            deployDeviceId = null;
+            document.getElementById('deployDeviceName').textContent = '目标: ' + ip;
+            resetDeploySteps();
+            document.getElementById('deployModal').style.display = 'block';
+        }
+
+        function resetDeploySteps() {
+            for (let i = 0; i < 5; i++) {
+                const icon = document.getElementById(`deployStep${i}Icon`);
+                const status = document.getElementById(`deployStep${i}Status`);
+                icon.style.background = '#ddd';
+                icon.textContent = String(i + 1);
+                status.textContent = '等待开始';
+                status.style.color = '#aaa';
+            }
+            document.getElementById('deployUserHint').style.display = 'none';
+            document.getElementById('deployLog').style.display = 'none';
+            document.getElementById('deployLog').textContent = '';
+            document.getElementById('deployBtn').disabled = false;
+            document.getElementById('deployBtn').textContent = '开始部署';
+            document.getElementById('deployBtn').style.background = '#27ae60';
+        }
+
+        function closeDeployModal() { document.getElementById('deployModal').style.display = 'none'; }
+
+        function setDeployStepState(idx, state, statusText, hintText) {
+            // state: 'active' | 'done' | 'error' | 'waiting'
+            const icon = document.getElementById(`deployStep${idx}Icon`);
+            const status = document.getElementById(`deployStep${idx}Status`);
+            const hint = document.getElementById('deployUserHint');
+
+            if (state === 'waiting') {
+                icon.style.background = '#ddd';
+                icon.textContent = String(idx + 1);
+                icon.classList.remove('deploy-step-active-icon');
+                status.textContent = statusText || '等待开始';
+                status.style.color = '#aaa';
+            } else if (state === 'active') {
+                icon.style.background = '#2e75b6';
+                icon.innerHTML = '&#8227;';
+                icon.classList.add('deploy-step-active-icon');
+                status.textContent = statusText || '进行中...';
+                status.style.color = '#2e75b6';
+            } else if (state === 'done') {
+                icon.style.background = '#34c759';
+                icon.textContent = '✓';
+                icon.classList.remove('deploy-step-active-icon');
+                status.textContent = statusText || '完成';
+                status.style.color = '#34c759';
+            } else if (state === 'error') {
+                icon.style.background = '#ff3b30';
+                icon.textContent = '✗';
+                icon.classList.remove('deploy-step-active-icon');
+                status.textContent = statusText || '失败';
+                status.style.color = '#ff3b30';
+            }
+
+            if (hintText) {
+                hint.innerHTML = hintText;
+                hint.style.display = 'block';
+            } else if (state !== 'active') {
+                // Clear hint when step completes or fails (unless a new hint is provided)
+            }
+        }
+
+        async function startRemoteDeploy() {
+            const ip = document.getElementById('deployIp').value.trim();
+            if (!ip) return alert('请先输入电视 IP 地址');
+
+            const btn = document.getElementById('deployBtn');
+            btn.disabled = true;
+            btn.textContent = '部署中...';
+
+            // Reset all steps to waiting
+            for (let i = 0; i < 5; i++) {
+                setDeployStepState(i, 'waiting', '等待开始');
+            }
+            document.getElementById('deployUserHint').style.display = 'none';
+            document.getElementById('deployLog').textContent = '';
+            document.getElementById('deployLog').style.display = 'none';
+
+            // Map SSE steps to UI step index + status text + optional user hint
+            const stepMap = {
+                'adb_connect':      { idx: 0, status: '正在连接ADB...' },
+                'adb_auth':         { idx: 0, status: '正在检查授权...' },
+                'adb_ok':           { idx: 0, status: 'ADB连接并授权成功', state: 'done' },
+                'install_apk':      { idx: 1, status: '正在安装APP...' },
+                'install_ok':       { idx: 1, status: 'APP安装成功', state: 'done' },
+                'uninstall_bloat':  { idx: 2, status: '正在卸载预装应用...' },
+                'uninstall_bloat_ok':{ idx: 2, status: '预装应用卸载完成', state: 'done' },
+                'configure':        { idx: 3, status: '正在配置服务器地址...' },
+                'launch':           { idx: 3, status: '正在启动APP...' },
+                'wait_register':    { idx: 4, status: '等待APP自注册...' },
+            };
+
+            let completedStep = -1;
+
+            try {
+                const evtSource = new EventSource(`/api/v1/deploy-tv-stream?ip=${encodeURIComponent(ip)}`);
+
+                evtSource.onmessage = function(event) {
+                    const data = JSON.parse(event.data);
+
+                    if (data.step === 'error') {
+                        evtSource.close();
+                        for (let i = 0; i < 5; i++) {
+                            const icon = document.getElementById(`deployStep${i}Icon`);
+                            if (icon.style.background === 'rgb(46, 117, 182)') {
+                                setDeployStepState(i, 'error', data.detail);
+                            }
+                        }
+                        const activeIdx = completedStep + 1;
+                        if (activeIdx < 5) {
+                            setDeployStepState(activeIdx, 'error', data.detail);
+                        }
+                        document.getElementById('deployUserHint').innerHTML = '<b>部署失败</b>，请检查错误信息后点击「重试」';
+                        document.getElementById('deployUserHint').style.display = 'block';
+                        btn.textContent = '重试';
+                        btn.style.background = '#ff9500';
+                        btn.disabled = false;
+                        return;
+                    }
+
+                    if (data.step === 'done') {
+                        evtSource.close();
+                        setDeployStepState(0, 'done', 'ADB连接并授权成功');
+                        setDeployStepState(1, 'done', 'APP安装成功');
+                        setDeployStepState(2, 'done', '预装应用已卸载');
+                        setDeployStepState(3, 'done', '配置并启动完成');
+                        setDeployStepState(4, 'done', '设备已上线');
+                        document.getElementById('deployUserHint').style.display = 'none';
+                        btn.textContent = '部署完成';
+                        btn.style.background = '#34c759';
+                        document.getElementById('deployIp').value = '';
+                        loadData();
+                        return;
+                    }
+
+                    const info = stepMap[data.step];
+                    if (info) {
+                        const isDone = info.state === 'done' || data.step === 'adb_ok' || data.step === 'install_ok' || data.step === 'uninstall_bloat_ok';
+
+                        for (let i = 0; i < info.idx; i++) {
+                            setDeployStepState(i, 'done');
+                        }
+
+                        if (isDone) {
+                            setDeployStepState(info.idx, 'done', info.status);
+                            completedStep = info.idx;
+                            for (let i = info.idx + 1; i < 5; i++) {
+                                setDeployStepState(i, 'waiting', '等待开始');
+                            }
+                            document.getElementById('deployUserHint').style.display = 'none';
+                        } else {
+                            setDeployStepState(info.idx, 'active', data.message || info.status);
+                            for (let i = info.idx + 1; i < 5; i++) {
+                                setDeployStepState(i, 'waiting', '等待开始');
+                            }
+
+                            let hintText = null;
+                            if (data.step === 'adb_auth' && data.message && data.message.includes('等待电视授权')) {
+                                hintText = '👉 <b>请在电视上点击「始终允许」</b>，否则部署无法继续';
+                            } else if (data.step === 'install_apk' && data.message && data.message.includes('安装APP')) {
+                                hintText = '正在安装APP，请耐心等待约30秒...';
+                            } else if (data.step === 'wait_register') {
+                                hintText = 'APP已启动，等待自动注册到服务器，约10秒...';
+                            }
+
+                            if (hintText) {
+                                document.getElementById('deployUserHint').innerHTML = hintText;
+                                document.getElementById('deployUserHint').style.display = 'block';
+                            }
+                        }
+
+                        // Append to log
+                        const logEl = document.getElementById('deployLog');
+                        logEl.style.display = 'block';
+                        logEl.textContent = (logEl.textContent ? logEl.textContent + '\n' : '') + (data.message || data.step);
+                        logEl.scrollTop = logEl.scrollHeight;
+                    }
+                };
+
+                evtSource.onerror = function() {
+                    evtSource.close();
+                    const activeIdx = completedStep + 1;
+                    if (activeIdx < 5) {
+                        setDeployStepState(activeIdx, 'error', '连接中断');
+                    }
+                    document.getElementById('deployUserHint').innerHTML = '<b>连接中断</b>，请检查网络后点击「重试」';
+                    document.getElementById('deployUserHint').style.display = 'block';
+                    btn.textContent = '重试';
+                    btn.style.background = '#ff9500';
+                    btn.disabled = false;
+                };
+
+            } catch (e) {
+                setDeployStepState(0, 'error', '请求失败: ' + e.message);
+                document.getElementById('deployUserHint').innerHTML = '<b>请求失败</b>，请检查后台服务是否正常运行';
+                document.getElementById('deployUserHint').style.display = 'block';
+                btn.textContent = '重试';
+                btn.style.background = '#ff9500';
+                btn.disabled = false;
+            }
+        }
+
         // Room Management
         function openRoomEdit(id, current) {
             currentRoomDeviceId = id;
@@ -1607,6 +2037,82 @@
             const roomName = document.getElementById('rName').value;
             const resp = await fetch(`/api/v1/devices/${currentRoomDeviceId}/room?room_name=${encodeURIComponent(roomName)}`, { method: 'POST' });
             if (resp.ok) { closeRoomModal(); loadData(); }
+        }
+
+        // WiFi config modal functions
+        function openWifiModal(deviceId, deviceName) {
+            currentWifiDeviceId = deviceId;
+            document.getElementById('wifiModalTitle').innerText = `推送WiFi配置 - ${deviceName}`;
+            const device = allDevices.find(d => d.id === deviceId);
+            if (device && device.wifi_config) {
+                try {
+                    const config = JSON.parse(device.wifi_config);
+                    document.getElementById('wifiSsid').value = config.ssid || '';
+                    document.getElementById('wifiSecurity').value = config.security || 'wpa2_psk';
+                    document.getElementById('wifiPassword').value = config.password || '';
+                    document.getElementById('wifiIdentity').value = config.identity || '';
+                    document.getElementById('wifiHidden').checked = config.hidden || false;
+                    document.getElementById('wifiCurrentStatus').innerText = '当前配置: SSID=' + config.ssid + ' (' + config.security + ')';
+                    document.getElementById('wifiClearBtn').style.display = 'inline-flex';
+                } catch(e) {
+                    document.getElementById('wifiCurrentStatus').innerText = '';
+                    document.getElementById('wifiClearBtn').style.display = 'none';
+                }
+            } else {
+                document.getElementById('wifiSsid').value = '';
+                document.getElementById('wifiSecurity').value = 'wpa2_psk';
+                document.getElementById('wifiPassword').value = '';
+                document.getElementById('wifiIdentity').value = '';
+                document.getElementById('wifiHidden').checked = false;
+            // 如果设备使用有线网络，显示提示
+            if (device && device.network_type === 'ethernet') {
+                document.getElementById('wifiCurrentStatus').innerText = '⚠ 该设备当前使用有线网络，推送WiFi后需断开网线才能切换到WiFi';
+            } else {
+                document.getElementById('wifiCurrentStatus').innerText = device && device.network_ssid ? '当前连接: ' + device.network_ssid : '';
+            }
+                document.getElementById('wifiClearBtn').style.display = 'none';
+            }
+            toggleWifiFields();
+            document.getElementById('wifiModal').style.display = 'block';
+        }
+        function closeWifiModal() { document.getElementById('wifiModal').style.display = 'none'; }
+        function toggleWifiFields() {
+            const security = document.getElementById('wifiSecurity').value;
+            document.getElementById('wifiPasswordGroup').style.display = (security === 'open') ? 'none' : 'block';
+            document.getElementById('wifiIdentityGroup').style.display = (security === 'wpa2_enterprise') ? 'block' : 'none';
+        }
+        async function saveWifiConfig() {
+            const ssid = document.getElementById('wifiSsid').value.trim();
+            if (!ssid) { alert('请输入WiFi名称'); return; }
+            const payload = {
+                ssid: ssid,
+                security: document.getElementById('wifiSecurity').value,
+                password: document.getElementById('wifiPassword').value || null,
+                identity: document.getElementById('wifiIdentity').value || null,
+                hidden: document.getElementById('wifiHidden').checked
+            };
+            if (payload.security === 'wpa2_psk' && !payload.password) { alert('WPA2-PSK需要输入密码'); return; }
+            if (payload.security === 'wpa2_enterprise' && (!payload.identity || !payload.password)) { alert('WPA2-Enterprise需要输入用户名和密码'); return; }
+            try {
+                const resp = await fetch(`/api/v1/devices/${currentWifiDeviceId}/wifi-config`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                const result = await resp.json();
+                if (result.ok) {
+                    alert('WiFi配置已保存，将在下次心跳时推送到设备');
+                    closeWifiModal(); loadData();
+                } else { alert('保存失败: ' + (result.detail || '未知错误')); }
+            } catch(e) { alert('网络错误'); }
+        }
+        async function clearWifiConfig() {
+            if (!confirm('确定要清除WiFi配置？设备将不会切换WiFi。')) return;
+            try {
+                const resp = await fetch(`/api/v1/devices/${currentWifiDeviceId}/wifi-config`, { method: 'DELETE' });
+                const result = await resp.json();
+                if (result.ok) { alert('WiFi配置已清除'); closeWifiModal(); loadData(); }
+            } catch(e) { alert('网络错误'); }
         }
 
         // Existing functions with slight improvements
@@ -1645,29 +2151,19 @@
 
             const controlsDiv = document.getElementById('remoteControlsArea');
             controlsDiv.innerHTML = `
-                <!-- Scrcpy 高级控制 -->
+                <!-- 远程连接 高级控制 -->
                 <div class="section-card">
-                    <h4 class="section-title">Scrcpy 高级控制</h4>
+                    <h4 class="section-title">远程连接 高级控制</h4>
                     <div style="font-size:14px; color:var(--gray-600); margin-bottom:14px;">
-                        使用Scrcpy实现实时屏幕镜像和低延迟控制
+                        使用远程连接实现实时屏幕镜像和低延迟控制
                     </div>
                     <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                        <button id="checkScrcpyBtn" class="btn btn-info btn-sm" onclick="checkScrcpyInstallation()">检查 Scrcpy</button>
-                        <button id="startScrcpyBtn" class="btn btn-success btn-sm" onclick="startScrcpySession(${deviceId})">启动 Scrcpy</button>
-                        <button id="stopScrcpyBtn" class="btn btn-danger btn-sm" onclick="stopScrcpySession(${deviceId})" style="display:none;">停止 Scrcpy</button>
+                        <button id="checkScrcpyBtn" class="btn btn-info btn-sm" onclick="checkScrcpyInstallation()">检查远程功能</button>
+                        <button id="startScrcpyBtn" class="btn btn-success btn-sm" onclick="startScrcpySession(${deviceId})">启动scrcpy远程连接</button>
+                        <button id="stopScrcpyBtn" class="btn btn-danger btn-sm" onclick="stopScrcpySession(${deviceId})" style="display:none;">停止远程连接</button>
                         <button id="getScrcpyCmdBtn" class="btn btn-sm" style="background: var(--gray-600);" onclick="getScrcpyCommand(${deviceId})">获取命令</button>
                     </div>
                     <div id="scrcpyStatus" style="margin-top:12px; font-size:14px; color:var(--gray-600);"></div>
-                </div>
-
-                <!-- ADB 连接管理 -->
-                <div class="section-card">
-                    <h4 class="section-title">ADB 连接管理</h4>
-                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                        <button id="adbConnectBtn" class="btn btn-sm" onclick="adbConnectDevice(${deviceId})">连接 ADB</button>
-                        <button id="adbDisconnectBtn" class="btn btn-warning btn-sm" onclick="adbDisconnectDevice(${deviceId})">断开 ADB</button>
-                    </div>
-                    <div id="adbStatus" style="margin-top:12px; font-size:14px; color:var(--gray-600);"></div>
                 </div>
 
                 <!-- 遥控器按钮 -->
@@ -1689,11 +2185,11 @@
                 </div>
             `;
 
-            // 检查Scrcpy状态
+            // 检查远程功能状态
             checkScrcpyInstallation();
         }
 
-        // ==================== 顶部 Scrcpy 快速连接 ====================
+        // ==================== 顶部 远程连接 ====================
         async function scrcpyConnectByIpTop() {
             const ip = document.getElementById('scrcpyIpTop').value.trim();
             if (!ip) return alert('请输入电视IP地址');
@@ -1870,6 +2366,8 @@
             const policyId = document.getElementById(`sel-${deviceId}`).value;
             if (!policyId) return alert('请先选择策略');
             await fetch(`/api/v1/devices/${deviceId}/bind-policy/${policyId}`, { method: 'POST' });
+            // 下发成功，清除本地暂存的选择
+            delete pendingSelections[`sel-${deviceId}`];
             alert('策略已下发');
             loadData();
         }
@@ -2015,12 +2513,47 @@
 
         function closeAppModal() { document.getElementById('appModal').style.display = 'none'; }
 
+        let _dangerConfirmCallback = null;
+
+        function showDangerConfirm(msg, callback) {
+            document.getElementById('dangerConfirmMsg').innerHTML = msg;
+            document.getElementById('dangerConfirmInput').value = '';
+            document.getElementById('dangerConfirmBtn').disabled = true;
+            document.getElementById('dangerConfirmModal').style.display = 'flex';
+            _dangerConfirmCallback = callback;
+        }
+
+        function closeDangerConfirm() {
+            document.getElementById('dangerConfirmModal').style.display = 'none';
+            _dangerConfirmCallback = null;
+        }
+
+        function executeDangerConfirm() {
+            if (document.getElementById('dangerConfirmInput').value.trim() !== '确认停用') return;
+            const cb = _dangerConfirmCallback;
+            closeDangerConfirm();
+            if (cb) cb();
+        }
+
+        // Enable confirm button only when input matches
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('dangerConfirmInput').addEventListener('input', function() {
+                document.getElementById('dangerConfirmBtn').disabled = this.value.trim() !== '确认停用';
+            });
+        });
+
         async function disableApp(packageName) {
-            if (!confirm(`确定停用 ${packageName}？\n（应用将被禁用，可通过恢复出厂设置恢复）`)) return;
-            const resp = await fetch(`/api/v1/devices/${currentAppDeviceId}/uninstall?package_name=${encodeURIComponent(packageName)}&is_system=true`, { method: 'POST' });
-            const result = await resp.json();
-            if (result.ok) { alert(result.message || '停用成功'); manageApps(currentAppDeviceId, ''); }
-            else alert('停用失败: ' + result.detail);
+            showDangerConfirm(
+                `即将停用系统应用：<br><code style="font-size:13px;background:#f5f5f7;padding:2px 6px;border-radius:3px;">${packageName}</code><br><br>` +
+                `<span style="color:var(--red);">停用系统应用可能导致电视功能异常，仅限维护人员操作。</span><br>` +
+                `<span style="color:var(--gray-600);font-size:13px;">可通过恢复出厂设置或点击「启用」按钮恢复。</span>`,
+                async function() {
+                    const resp = await fetch(`/api/v1/devices/${currentAppDeviceId}/uninstall?package_name=${encodeURIComponent(packageName)}&is_system=true`, { method: 'POST' });
+                    const result = await resp.json();
+                    if (result.ok) { alert(result.message || '停用成功'); manageApps(currentAppDeviceId, ''); }
+                    else alert('停用失败: ' + result.detail);
+                }
+            );
         }
 
         async function uninstallApp(packageName, isSystem) {
@@ -2108,34 +2641,7 @@
         function closeLogModal() { document.getElementById('logModal').style.display = 'none'; }
         async function clearLogs() { if (confirm('清空所有记录？')) { await fetch('/api/v1/logs', { method: 'DELETE' }); showLogs(); } }
 
-        async function remoteDeploy() {
-            const ip = document.getElementById('deployIp').value.trim();
-            if (!ip) return alert('请输入有效的 IP 地址');
-
-            const btn = event.target;
-            const oldText = btn.innerText;
-            btn.innerText = "部署中...";
-            btn.disabled = true;
-
-            try {
-                const resp = await fetch(`/api/v1/deploy-tv?ip=${encodeURIComponent(ip)}`, { method: 'POST' });
-                const result = await resp.json();
-                if (result.ok) {
-                    alert('部署指令下发成功！\n请等待电视自动安装并启动，随后将自动出现在下方设备列表中。');
-                    document.getElementById('deployIp').value = '';
-                    loadData();
-                } else {
-                    alert('部署失败: ' + (result.detail || '未知错误'));
-                }
-            } catch (e) {
-                alert('网络连接失败，请检查后端服务是否运行');
-            } finally {
-                btn.innerText = oldText;
-                btn.disabled = false;
-            }
-        }
-
-        // ==================== Scrcpy相关函数 ====================
+        // ==================== 远程连接相关函数 ====================
 
         async function checkScrcpyInstallation() {
             try {
@@ -2145,14 +2651,14 @@
                 const statusDiv = document.getElementById('scrcpyStatus');
                 if (result.ok && result.installed) {
                     statusDiv.innerHTML = `<span style="color: var(--green);">${result.message}</span>`;
-                    document.getElementById('checkScrcpyBtn').innerHTML = 'Scrcpy已安装';
+                    document.getElementById('checkScrcpyBtn').innerHTML = 'scrcpy远程功能已安装';
                     document.getElementById('checkScrcpyBtn').className = 'btn btn-success btn-sm';
                     // Hide install buttons if they exist
                     const installArea = document.getElementById('scrcpyInstallArea');
                     if (installArea) installArea.style.display = 'none';
                 } else {
                     statusDiv.innerHTML = `<span style="color: var(--red);">${result.message}</span>`;
-                    document.getElementById('checkScrcpyBtn').innerHTML = 'Scrcpy未安装';
+                    document.getElementById('checkScrcpyBtn').innerHTML = 'scrcpy远程功能未安装';
                     document.getElementById('checkScrcpyBtn').className = 'btn btn-danger btn-sm';
                     // Show install buttons
                     let installArea = document.getElementById('scrcpyInstallArea');
@@ -2161,7 +2667,7 @@
                         installArea.id = 'scrcpyInstallArea';
                         installArea.style.cssText = 'margin-top:14px; padding:16px; background:var(--gray-50); border-radius:14px; border:1px dashed #d2d2d7;';
                         installArea.innerHTML = `
-                            <div style="font-size:14px; margin-bottom:10px; color:var(--gray-800);">Scrcpy未安装，请选择以下方式安装：</div>
+                            <div style="font-size:14px; margin-bottom:10px; color:var(--gray-800);">远程功能未安装，请选择以下方式安装：</div>
                             <div style="display:flex; gap:10px; flex-wrap:wrap;">
                                 <button class="btn btn-success btn-sm" onclick="autoInstallScrcpy()">一键自动安装</button>
                                 <a href="/api/v1/scrcpy/download-script" class="btn btn-info btn-sm" style="text-decoration:none; color:#fff;" download>下载安装脚本</a>
@@ -2175,7 +2681,7 @@
                 }
             } catch (error) {
                 const statusDiv = document.getElementById('scrcpyStatus');
-                    statusDiv.innerHTML = `<span style="color: var(--red);">Scrcpy检查失败: ${error.message || '网络异常'}</span>`;
+                    statusDiv.innerHTML = `<span style="color: var(--red);">远程功能检查失败: ${error.message || '网络异常'}</span>`;
             }
         }
 
@@ -2185,7 +2691,7 @@
             const oldText = btn.innerHTML;
             btn.disabled = true;
             btn.innerHTML = '安装中...';
-            statusDiv.innerHTML = '<span style="color:#9a5c00;">正在自动下载并安装Scrcpy，请耐心等待（可能需要1-2分钟）...</span>';
+            statusDiv.innerHTML = '<span style="color:#9a5c00;">正在自动下载并安装远程功能组件，请耐心等待（可能需要1-2分钟）...</span>';
 
             try {
                 const resp = await fetch('/api/v1/scrcpy/auto-install', { method: 'POST' });
@@ -2196,19 +2702,19 @@
                     // Re-check installation status
                     setTimeout(() => checkScrcpyInstallation(), 1000);
                 } else {
-                    statusDiv.innerHTML = `<span style="color:var(--red);">Scrcpy安装失败: ${result.detail}</span>`;
+                    statusDiv.innerHTML = `<span style="color:var(--red);">远程功能安装失败: ${result.detail}</span>`;
                     btn.disabled = false;
                     btn.innerHTML = oldText;
                 }
             } catch (error) {
-                statusDiv.innerHTML = `<span style="color:var(--red);">Scrcpy安装请求失败: ${error.message || '网络异常'}</span>`;
+                statusDiv.innerHTML = `<span style="color:var(--red);">远程功能安装请求失败: ${error.message || '网络异常'}</span>`;
                 btn.disabled = false;
                 btn.innerHTML = oldText;
             }
         }
 
         async function startScrcpySession(deviceId) {
-            if (!confirm('启动Scrcpy将打开一个新窗口进行实时屏幕控制。确认启动吗？')) {
+            if (!confirm('启动远程连接将打开一个新窗口进行实时屏幕控制。确认启动吗？')) {
                 return;
             }
 
@@ -2227,11 +2733,11 @@
                 if (!adbResult.ok) {
                     statusDiv.innerHTML = `<span style="color: var(--red);">ADB连接失败: ${adbResult.detail}</span>`;
                     startBtn.disabled = false;
-                    startBtn.innerHTML = '启动 Scrcpy';
+                    startBtn.innerHTML = '启动scrcpy远程连接';
                     return;
                 }
 
-                // 启动Scrcpy会话
+                // 启动远程连接会话
                 const resp = await fetch(`/api/v1/devices/${deviceId}/scrcpy/start`, { method: 'POST' });
                 const result = await resp.json();
 
@@ -2245,12 +2751,12 @@
                 } else {
                     statusDiv.innerHTML = `<span style="color: var(--red);">${result.detail}</span>`;
                     startBtn.disabled = false;
-                    startBtn.innerHTML = '启动 Scrcpy';
+                    startBtn.innerHTML = '启动scrcpy远程连接';
                 }
             } catch (error) {
-                    statusDiv.innerHTML = `<span style="color: var(--red);">Scrcpy启动失败: ${error.message || '网络异常'}</span>`;
+                    statusDiv.innerHTML = `<span style="color: var(--red);">远程连接启动失败: ${error.message || '网络异常'}</span>`;
                 startBtn.disabled = false;
-                startBtn.innerHTML = '启动 Scrcpy';
+                startBtn.innerHTML = '启动scrcpy远程连接';
             }
         }
 
@@ -2271,19 +2777,19 @@
                     stopBtn.style.display = 'none';
                     startBtn.style.display = 'inline-block';
                     startBtn.disabled = false;
-                    startBtn.innerHTML = '启动 Scrcpy';
+                    startBtn.innerHTML = '启动scrcpy远程连接';
 
                     // 停止状态轮询
                     stopScrcpyStatusPolling();
                 } else {
                     statusDiv.innerHTML = `<span style="color: var(--red);">${result.detail}</span>`;
                     stopBtn.disabled = false;
-                    stopBtn.innerHTML = '停止 Scrcpy';
+                    stopBtn.innerHTML = '停止远程连接';
                 }
             } catch (error) {
-                    statusDiv.innerHTML = `<span style="color: var(--red);">Scrcpy停止失败: ${error.message || '网络异常'}</span>`;
+                    statusDiv.innerHTML = `<span style="color: var(--red);">远程连接停止失败: ${error.message || '网络异常'}</span>`;
                 stopBtn.disabled = false;
-                stopBtn.innerHTML = '停止 Scrcpy';
+                stopBtn.innerHTML = '停止远程连接';
             }
         }
 
@@ -2299,9 +2805,9 @@
 
                     const statusDiv = document.getElementById('scrcpyStatus');
                     if (result.ok && result.status === 'running') {
-                        statusDiv.innerHTML = `<span style="color: var(--green);">Scrcpy运行中 (PID: ${result.pid})</span>`;
+                        statusDiv.innerHTML = `<span style="color: var(--green);">远程连接运行中 (PID: ${result.pid})</span>`;
                     } else if (result.ok && result.status === 'stopped') {
-                        statusDiv.innerHTML = `<span style="color: var(--orange);">Scrcpy已停止 (退出码: ${result.exit_code})</span>`;
+                        statusDiv.innerHTML = `<span style="color: var(--orange);">远程连接已停止 (退出码: ${result.exit_code})</span>`;
                         stopScrcpyStatusPolling();
 
                         // 更新按钮状态
@@ -2310,7 +2816,7 @@
                         stopBtn.style.display = 'none';
                         startBtn.style.display = 'inline-block';
                         startBtn.disabled = false;
-                        startBtn.innerHTML = '启动 Scrcpy';
+                        startBtn.innerHTML = '启动scrcpy远程连接';
                     }
                 } catch (error) {
                     // 忽略轮询错误
@@ -2334,81 +2840,21 @@
                     const command = result.command;
                     const steps = result.steps.join('\n');
 
-                    const message = `Scrcpy启动命令:\n\n${command}\n\n使用步骤:\n${steps}\n\n提示: 复制命令到命令行执行即可启动Scrcpy`;
+                    const message = `远程连接启动命令:\n\n${command}\n\n使用步骤:\n${steps}\n\n提示: 复制命令到命令行执行即可启动远程连接`;
                     alert(message);
                 } else {
-                    alert(`获取Scrcpy命令失败: ${result.detail}`);
+                    alert(`获取远程连接命令失败: ${result.detail}`);
                 }
             } catch (error) {
-                alert(`获取Scrcpy命令失败: ${error.message || '网络异常'}`);
-            }
-        }
-
-        async function adbConnectDevice(deviceId) {
-            const statusDiv = document.getElementById('adbStatus');
-            const connectBtn = document.getElementById('adbConnectBtn');
-
-            connectBtn.disabled = true;
-            connectBtn.innerHTML = '连接中...';
-
-            try {
-                const resp = await fetch(`/api/v1/devices/${deviceId}/adb/connect`, { method: 'POST' });
-                const result = await resp.json();
-
-                if (result.ok) {
-                    statusDiv.innerHTML = `<span style="color: var(--green);">${result.message}</span>`;
-                    connectBtn.innerHTML = '已连接';
-                    connectBtn.className = 'btn btn-success btn-sm';
-                } else {
-                    statusDiv.innerHTML = `<span style="color: var(--red);">${result.detail}</span>`;
-                    connectBtn.innerHTML = '连接 ADB';
-                }
-            } catch (error) {
-                statusDiv.innerHTML = `<span style="color: var(--red);">ADB连接失败: ${error.message || '网络异常'}</span>`;
-                connectBtn.innerHTML = '连接 ADB';
-            } finally {
-                connectBtn.disabled = false;
-            }
-        }
-
-        async function adbDisconnectDevice(deviceId) {
-            const statusDiv = document.getElementById('adbStatus');
-            const disconnectBtn = document.getElementById('adbDisconnectBtn');
-
-            disconnectBtn.disabled = true;
-            disconnectBtn.innerHTML = '断开中...';
-
-            try {
-                const resp = await fetch(`/api/v1/devices/${deviceId}/adb/disconnect`, { method: 'POST' });
-                const result = await resp.json();
-
-                if (result.ok) {
-                    statusDiv.innerHTML = `<span style="color: var(--green);">${result.message}</span>`;
-                    disconnectBtn.innerHTML = '已断开';
-                    disconnectBtn.className = 'btn btn-sm';
-                    disconnectBtn.style.background = 'var(--gray-600)';
-
-                    // 重置连接按钮
-                    const connectBtn = document.getElementById('adbConnectBtn');
-                    connectBtn.innerHTML = '连接 ADB';
-                    connectBtn.className = 'btn btn-sm';
-                } else {
-                    statusDiv.innerHTML = `<span style="color: var(--red);">${result.detail}</span>`;
-                    disconnectBtn.innerHTML = '断开 ADB';
-                }
-            } catch (error) {
-                statusDiv.innerHTML = `<span style="color: var(--red);">ADB断开失败: ${error.message || '网络异常'}</span>`;
-                disconnectBtn.innerHTML = '断开 ADB';
-            } finally {
-                disconnectBtn.disabled = false;
+                alert(`获取远程连接命令失败: ${error.message || '网络异常'}`);
             }
         }
 
         function showScrcpyHelp() {
-            const helpText = `Scrcpy使用帮助：
+            const helpText = `远程连接使用帮助：
 
-什么是Scrcpy？
-Scrcpy是一个开源的Android屏幕镜像工具，可以通过ADB无线调试实现：
+什么是远程连接？
+远程连接基于Scrcpy开源工具，通过ADB无线调试实现：
 - 实时屏幕镜像（低延迟）
 - 鼠标点击控制
 - 键盘输入支持
@@ -2426,9 +2872,8 @@ Scrcpy是一个开源的Android屏幕镜像工具，可以通过ADB无线调试�
 4. 开启"USB调试"和"无线调试"
 
 连接步骤：
-1. 在管理后台点击"检查Scrcpy"
-2. 点击"连接ADB"建立连接
-3. 点击"启动Scrcpy"开始控制
+1. 在管理后台点击"检查远程功能"
+2. 点击"启动scrcpy远程连接"开始控制
 
 注意事项：
 - 确保电视和电脑在同一网络
@@ -2438,7 +2883,7 @@ Scrcpy是一个开源的Android屏幕镜像工具，可以通过ADB无线调试�
             alert(helpText);
         }
 
-        // 修改closeScreenshotModal函数，停止Scrcpy状态轮询
+        // 修改closeScreenshotModal函数，停止远程连接状态轮询
         // Init
         loadData();
         setInterval(loadData, 5000);

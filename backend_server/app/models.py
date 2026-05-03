@@ -29,6 +29,11 @@ class Device(Base):
     eth_mac: Mapped[str | None] = mapped_column(String(32), nullable=True)
     network_ssid: Mapped[str | None] = mapped_column(String(128), nullable=True)
     network_type: Mapped[str | None] = mapped_column(String(16), nullable=True)  # "wifi" | "ethernet" | "none"
+    wifi_rssi: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    wifi_frequency: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    wifi_link_speed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ping_latency: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ping_packet_loss: Mapped[int | None] = mapped_column(Integer, nullable=True)
     installed_apps: Mapped[str | None] = mapped_column(Text, nullable=True)
     ram_usage: Mapped[str | None] = mapped_column(String(64), nullable=True) # New field
     storage_usage: Mapped[str | None] = mapped_column(String(64), nullable=True) # New field
@@ -36,6 +41,7 @@ class Device(Base):
     token: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     policy_id: Mapped[int | None] = mapped_column(ForeignKey("policies.id"), nullable=True)
     policy_paused: Mapped[bool] = mapped_column(Boolean, default=False)  # 策略暂停状态
+    wifi_config: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: {ssid, security, password, identity, hidden}
     updated_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     policy = relationship("Policy")
 

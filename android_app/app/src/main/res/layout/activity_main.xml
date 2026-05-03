@@ -11,34 +11,36 @@
         android:layout_height="wrap_content"
         android:layout_alignParentLeft="true"
         android:layout_alignParentTop="true"
-        android:layout_marginLeft="40dp"
-        android:layout_marginTop="24dp"
+        android:layout_marginLeft="36dp"
+        android:layout_marginTop="20dp"
         android:text="00:00"
-        android:textColor="#4A5568"
-        android:textSize="16sp"
+        android:textColor="#3D4F65"
+        android:textSize="15sp"
         android:fontFamily="sans-serif-light" />
 
     <!-- 右上角：设置按钮 -->
     <LinearLayout
         android:id="@+id/openSettingsBtn"
-        android:layout_width="72dp"
-        android:layout_height="52dp"
+        android:layout_width="wrap_content"
+        android:layout_height="36dp"
         android:layout_alignParentRight="true"
         android:layout_alignParentTop="true"
-        android:layout_marginRight="40dp"
+        android:layout_marginRight="36dp"
         android:layout_marginTop="16dp"
         android:background="@drawable/btn_settings_selector"
         android:clickable="true"
         android:focusable="true"
         android:gravity="center"
+        android:paddingLeft="14dp"
+        android:paddingRight="14dp"
         android:orientation="vertical">
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="⚙"
+            android:text="设置"
             android:textColor="#8892A6"
-            android:textSize="22sp" />
+            android:textSize="13sp" />
     </LinearLayout>
 
     <!-- 中间：启动投屏按钮 -->
@@ -52,17 +54,17 @@
         android:focusable="true"
         android:gravity="center"
         android:orientation="vertical"
-        android:paddingLeft="56dp"
-        android:paddingTop="36dp"
-        android:paddingRight="56dp"
-        android:paddingBottom="36dp">
+        android:paddingLeft="52dp"
+        android:paddingTop="32dp"
+        android:paddingRight="52dp"
+        android:paddingBottom="32dp">
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="启动投屏"
             android:textColor="#FFFFFF"
-            android:textSize="28sp"
+            android:textSize="26sp"
             android:textStyle="bold"
             android:fontFamily="sans-serif-medium" />
 
@@ -70,10 +72,10 @@
             android:id="@+id/executeBtnSubtitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
+            android:layout_marginTop="8dp"
             android:text="点击立即执行策略"
-            android:textColor="#6B7A8F"
-            android:textSize="14sp" />
+            android:textColor="#5A6D82"
+            android:textSize="12sp" />
     </LinearLayout>
 
     <!-- 右下角：状态显示 -->
@@ -82,8 +84,8 @@
         android:layout_height="wrap_content"
         android:layout_alignParentRight="true"
         android:layout_alignParentBottom="true"
-        android:layout_marginRight="40dp"
-        android:layout_marginBottom="36dp"
+        android:layout_marginRight="36dp"
+        android:layout_marginBottom="28dp"
         android:orientation="vertical"
         android:gravity="right">
 
@@ -98,31 +100,29 @@
                 android:id="@+id/modeIndicator"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:background="#1A2332"
-                android:paddingLeft="14dp"
-                android:paddingTop="7dp"
-                android:paddingRight="14dp"
-                android:paddingBottom="7dp"
+                android:background="#141C28"
+                android:paddingLeft="12dp"
+                android:paddingTop="5dp"
+                android:paddingRight="12dp"
+                android:paddingBottom="5dp"
                 android:text="APP模式"
                 android:textColor="#22C55E"
-                android:textSize="13sp"
-                android:textStyle="bold"
+                android:textSize="12sp"
                 android:fontFamily="sans-serif-medium" />
 
             <TextView
                 android:id="@+id/policyStatusIndicator"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginLeft="8dp"
-                android:background="#1A2332"
-                android:paddingLeft="14dp"
-                android:paddingTop="7dp"
-                android:paddingRight="14dp"
-                android:paddingBottom="7dp"
+                android:layout_marginLeft="6dp"
+                android:background="#141C28"
+                android:paddingLeft="12dp"
+                android:paddingTop="5dp"
+                android:paddingRight="12dp"
+                android:paddingBottom="5dp"
                 android:text="运行中"
                 android:textColor="#22C55E"
-                android:textSize="13sp"
-                android:textStyle="bold"
+                android:textSize="12sp"
                 android:fontFamily="sans-serif-medium" />
         </LinearLayout>
 
@@ -131,21 +131,11 @@
             android:id="@+id/connectionIndicator"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
+            android:layout_marginTop="6dp"
             android:text="● 已连接"
             android:textColor="#3B82F6"
-            android:textSize="13sp"
-            android:fontFamily="sans-serif-medium" />
-
-        <!-- 版本号 -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="v1.0.0"
-            android:textColor="#2D3748"
             android:textSize="12sp"
-            android:fontFamily="sans-serif-light" />
+            android:fontFamily="sans-serif-medium" />
     </LinearLayout>
 
     <!-- 左下角：当前策略详情 -->
@@ -154,27 +144,26 @@
         android:layout_height="wrap_content"
         android:layout_alignParentLeft="true"
         android:layout_alignParentBottom="true"
-        android:layout_marginLeft="40dp"
-        android:layout_marginBottom="36dp"
+        android:layout_marginLeft="36dp"
+        android:layout_marginBottom="28dp"
         android:orientation="vertical">
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="当前策略"
-            android:textColor="#4A5568"
-            android:textSize="12sp"
+            android:textColor="#3D4F65"
+            android:textSize="11sp"
             android:fontFamily="sans-serif-light" />
 
         <TextView
             android:id="@+id/statusText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
+            android:layout_marginTop="3dp"
             android:text="投屏软件"
-            android:textColor="#E2E8F0"
-            android:textSize="16sp"
-            android:textStyle="bold"
+            android:textColor="#C8D4E0"
+            android:textSize="15sp"
             android:fontFamily="sans-serif-medium" />
     </LinearLayout>
 

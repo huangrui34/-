@@ -86,6 +86,19 @@
             android:layout_marginTop="24dp"
             android:background="#CCCCCC" />
 
+        <Button
+            android:id="@+id/wifiConnectBtn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="WiFi 连接" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="24dp"
+            android:background="#CCCCCC" />
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -129,5 +142,18 @@
             android:layout_marginTop="8dp"
             android:text="注意：企业 Wi-Fi 需要电视机支持 PEAP/MSCHAPv2。连接过程中请保持耐心。"
             android:textSize="12sp" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="24dp"
+            android:background="#CCCCCC" />
+
+        <Button
+            android:id="@+id/aboutBtn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="关于本机" />
     </LinearLayout>
 </ScrollView>

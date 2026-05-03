@@ -4,5 +4,23 @@
         <item name="colorPrimary">#1976D2</item>
         <item name="colorPrimaryVariant">#0D47A1</item>
         <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="android:windowBackground">#0A0E14</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+
+    <!-- 启动专用主题：使用最轻量的父主题，避免MaterialComponents冷启动白屏 -->
+    <!-- Android 6设备上MaterialComponents初始化慢，会短暂显示白色预览窗口 -->
+    <!-- 此主题确保冷启动时立即显示深色背景，Activity创建后切换到完整主题 -->
+    <style name="Theme.TvLauncher.Splash" parent="android:Theme.NoTitleBar.Fullscreen">
+        <item name="android:windowBackground">#0A0E14</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowDisablePreview">false</item>
+    </style>
+
+    <style name="Theme.TvLauncher.Fullscreen" parent="Theme.TvLauncher">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowContentOverlay">@null</item>
     </style>
 </resources>

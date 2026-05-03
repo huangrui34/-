@@ -624,7 +624,7 @@ def create_requirement_doc():
             ["FR-PM-003", "策略绑定", "P0", "将策略绑定到指定设备", "绑定后通过 ADB 推送，设备 10 秒内开始执行"],
             ["FR-PM-004", "策略暂停", "P1", "暂停策略执行", '设备停止自动执行，标签变为\u201c已暂停\u201d'],
             ["FR-PM-005", "策略恢复", "P1", "恢复暂停的策略", '设备恢复执行，标签变为\u201c运行中\u201d'],
-            ["FR-PM-006", "策略自动执行", "P0", "设备开机/重启后自动执行绑定的策略", "开机 30 秒内开始执行目标策略"],
+            ["FR-PM-006", "策略自动执行", "P0", "设备开机/重启后自动执行绑定的策略", "开机后立即显示深色界面（无白屏闪烁），1.5秒内执行目标策略"],
         ], highlight_col=[0], priority_col=2, col_widths=[2.2, 2, 1.2, 4, 4])
 
     doc.add_heading("4.3  远程控制", level=2)
@@ -836,7 +836,7 @@ def create_prd_doc():
     make_table(doc,
         ["操作", "入口", "逻辑"],
         [
-            ["绑定策略", '设备行\u201c执行策略\u201d下拉框+\u201c更新策略\u201d按钮', "下发策略到设备，通过 ADB 推送广播立即生效"],
+            ["绑定策略", '设备行\u201c执行策略\u201d下拉框+\u201c下发\u201d按钮', "下拉选择策略（轮询刷新时保留未保存的选择），点击\u201c下发\u201d推送到设备并立即生效"],
             ["暂停策略", '设备行\u201c\u23f8 暂停\u201d按钮', '设备停止自动执行策略，标签变为\u201c已暂停\u201d'],
             ["恢复策略", '设备行\u201c\u25b6 继续\u201d按钮', '设备恢复执行策略，标签变为\u201c运行中\u201d'],
         ], col_widths=[2.5, 5, 5.5])
@@ -1061,7 +1061,7 @@ def create_prd_doc():
 "\u2502                                            \u2502\n"
 "\u2502\u6295\u5c4f\u8f6f\u4ef6              [APP\u6a21\u5f0f] [\u25b6 \u8fd0\u884c\u4e2d]  \u2502\n"
 "\u2502                         \u25cf \u5df2\u8fde\u63a5           \u2502\n"
-"\u2502                         v0.1.0             \u2502\n"
+"\u2502                         v0.2.0             \u2502\n"
 "\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518"
     )
 
@@ -1386,7 +1386,7 @@ def create_design_doc():
 "\u2502                                            \u2502\n"
 "\u2502\u6295\u5c4f\u8f6f\u4ef6              [APP\u6a21\u5f0f] [\u25b6 \u8fd0\u884c\u4e2d]  \u2502\n"
 "\u2502                         \u25cf \u5df2\u8fde\u63a5           \u2502\n"
-"\u2502                         v0.1.0             \u2502\n"
+"\u2502                         v0.2.0             \u2502\n"
 "\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518"
     )
 
@@ -1404,7 +1404,7 @@ def create_design_doc():
             ["KeepAliveForegroundService.kt", "182", "前台保活服务：5 秒检测目标 APP"],
             ["NetworkInfoProvider.kt", "85", "网络信息采集：IP/MAC/SSID/活动网络类型"],
             ["SyncWorker.kt", "51", "WorkManager 后台定时同步（15 分钟）"],
-            ["BootReceiver.kt", "67", "开机自启：启动服务+执行策略"],
+            ["BootReceiver.kt", "70", "开机自启：立即启动Activity+延迟1.5秒执行策略"],
             ["HomeKeyService.kt", "76", "无障碍服务：Kiosk 模式拦截 HOME/BACK"],
             ["SettingsActivity.kt", "157", "设置界面：服务器地址、策略、企业 WiFi"],
         ], col_widths=[6, 1.5, 5.5])
@@ -1418,7 +1418,8 @@ def create_design_doc():
             ["启动冷却", "SharedPreferences 记录时间", "启动 APP 后 15 秒内判定为运行中，避免重启循环"],
             ["前后台判断", "onResume/onPause 写状态", "Launcher 在前台 \u2192 目标 APP 没在运行；Launcher 在后台 \u2192 目标 APP 在运行"],
             ["Kiosk 模式", "AccessibilityService", "拦截 HOME/BACK，三击 HOME 临时退出 10 分钟"],
-            ["HDMI 切换", "Intent + DPAD 模拟", "打开小米电视播放器，通过方向键导航选择 HDMI 端口"],
+            ["HDMI 切换", "TvView API + 多芯片适配", "通过TvInputManager/TvView直接调谐HDMI输入，适配Amlogic/MediaTek/MStar/Realtek"],
+            ["冷启动优化", "轻量Splash主题 + 立即启动", "Manifest使用android:Theme.NoTitleBar.Fullscreen避免MaterialComponents白屏，onCreate中切回完整主题"],
         ], col_widths=[2.5, 4.5, 6.5])
 
     # === 6 运行环境 ===

@@ -14,21 +14,13 @@ import android.os.Looper
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 
-/**
- * 前台服务，用于防止APP被系统清理
- * 同时持续监控目标APP是否在运行
- *
- * 策略保活逻辑：
- * - APP模式：确保目标APP一直在前台运行
- * - HDMI模式：确保com.xiaomi.mitv.tvplayer一直在运行
- */
 class KeepAliveForegroundService : Service() {
 
     companion object {
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "tv_launcher_keep_alive"
         private const val TAG = "KeepAliveService"
-        private const val CHECK_INTERVAL_MS = 5000L // 5秒检查一次
+        private const val CHECK_INTERVAL_MS = 5000L
         private const val HDMI_PLAYER_PACKAGE = "com.xiaomi.mitv.tvplayer"
     }
 
@@ -49,14 +41,12 @@ class KeepAliveForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // 确保服务持续运行，被杀死后自动重启
         return START_STICKY
     }
 
     override fun onDestroy() {
         super.onDestroy()
         keepAliveRunnable?.let { handler.removeCallbacks(it) }
-        // 服务被销毁时，尝试重启自己
         val restartIntent = Intent(applicationContext, KeepAliveForegroundService::class.java)
         applicationContext.startService(restartIntent)
     }
@@ -95,7 +85,6 @@ class KeepAliveForegroundService : Service() {
             }
         }
 
-        // 点击通知打开MainActivity
         val pendingIntent = PendingIntent.getActivity(
             this,
             0,
@@ -114,9 +103,6 @@ class KeepAliveForegroundService : Service() {
             .build()
     }
 
-    /**
-     * 更新通知显示当前保活状态
-     */
     private fun updateNotification() {
         val notificationManager = getSystemService(NotificationManager::class.java)
         notificationManager.notify(NOTIFICATION_ID, createNotification())
@@ -129,12 +115,17 @@ class KeepAliveForegroundService : Service() {
         keepAliveRunnable = object : Runnable {
             override fun run() {
                 try {
-                    // 首先检查策略是否暂停
                     if (policyStore.isPolicyPaused()) {
-                        android.util.Log.d(TAG, "策略已暂停，跳过保活检查")
-                        // 更新通知显示暂停状态
+                        // 策略暂停时，确保Launcher在前台（不要停留在投屏APP中）
+                        val prefs = getSharedPreferences("tv_policy", Context.MODE_PRIVATE)
+                        val isLauncherFg = prefs.getBoolean("launcher_foreground", true)
+                        if (!isLauncherFg) {
+                            android.util.Log.d(TAG, "策略已暂停，Launcher不在前台，切回主页")
+                            val intent = Intent(this@KeepAliveForegroundService, MainActivity::class.java)
+                            intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(intent)
+                        }
                         updateNotification()
-                        // 继续定时检查，以便恢复后能立即生效
                         handler.postDelayed(this, CHECK_INTERVAL_MS)
                         return
                     }
@@ -143,20 +134,16 @@ class KeepAliveForegroundService : Service() {
 
                     when (policy.mode) {
                         "app" -> {
-                            // APP模式：确保目标APP在运行
                             val targetPackage = policy.targetAppPackage
                             if (!targetPackage.isNullOrBlank() &&
                                 targetPackage != "com.example.cast" &&
                                 targetPackage != "com.android.settings") {
 
                                 if (!executor.isAppRunning(targetPackage)) {
-                                    // 目标APP不在运行，重新启动
                                     android.util.Log.d(TAG, "目标APP未运行，重新启动: $targetPackage")
                                     executor.launchApp(targetPackage)
                                     lastLaunchedPackage = targetPackage
                                     consecutiveFailures++
-
-                                    // 更新通知
                                     updateNotification()
                                 } else {
                                     consecutiveFailures = 0
@@ -164,9 +151,6 @@ class KeepAliveForegroundService : Service() {
                             }
                         }
                         "hdmi" -> {
-                            // HDMI模式：不需要保活检查
-                            // HDMI切换是一次性的，一旦切换成功就由系统接管
-                            // 我们只需要确保播放器启动过一次即可，不需要持续检查
                             consecutiveFailures = 0
                         }
                     }
@@ -175,12 +159,10 @@ class KeepAliveForegroundService : Service() {
                     e.printStackTrace()
                 }
 
-                // 每5秒检查一次
                 handler.postDelayed(this, CHECK_INTERVAL_MS)
             }
         }
 
-        // 延迟1秒后开始检查（加快首次检查）
         handler.postDelayed(keepAliveRunnable!!, 1000)
     }
 }

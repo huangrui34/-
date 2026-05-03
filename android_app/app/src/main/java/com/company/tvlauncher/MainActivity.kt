@@ -2,10 +2,13 @@ package com.company.tvlauncher
 
 import android.app.ActivityManager
 import android.app.AlertDialog
+import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -58,7 +61,9 @@ class MainActivity : AppCompatActivity() {
                     mainHandler.post {
                         refreshStatus(policyStore)
                         if (isPaused) {
-                            android.util.Log.d("MainActivity", "===== 策略已暂停，不执行 =====")
+                            android.util.Log.d("MainActivity", "===== 策略已暂停，切回主页 =====")
+                            // 暂停策略时：把Launcher带到前台，停止HDMI，关闭投屏APP
+                            bringLauncherToFront()
                         } else {
                             android.util.Log.d("MainActivity", "===== 策略未暂停，执行策略 =====")
                             forceExecutePolicy(policyStore, force = true, userTriggered = true)
@@ -81,8 +86,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 从轻量启动主题切换到完整主题（防止Android 6冷启动白屏）
+        setTheme(R.style.Theme_TvLauncher_Fullscreen)
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        // 请求位置权限（Android 6+读取WiFi SSID需要）
+        requestLocationPermission()
 
         val policyStore = PolicyStore(this)
         refreshStatus(policyStore)
@@ -91,7 +101,6 @@ class MainActivity : AppCompatActivity() {
             showPasswordDialog(policyStore)
         }
         findViewById<LinearLayout>(R.id.executeBtn).setOnClickListener {
-            // 用户手动点击按钮：启动目标APP一次（即使策略暂停也生效，但不改变暂停状态）
             launchTargetOnce(policyStore)
         }
 
@@ -131,6 +140,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * 请求位置权限（Android 6+读取WiFi SSID需要ACCESS_COARSE_LOCATION）
+     */
+    private fun requestLocationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestPermissions(
+                    arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION),
+                    100
+                )
+            }
+        }
+    }
+
+    /**
      * 手动启动目标APP一次（按钮点击）
      * 不管策略是否暂停，都启动目标APP一次。
      * 不启动保活服务，不改变暂停状态 —— 仅启动一次。
@@ -159,6 +184,22 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun bringLauncherToFront() {
+        // 暂停策略时：关闭HDMI画面，把Launcher带到前台
+        try {
+            // 如果HdmiActivity在前台，先关掉它
+            val hdmiIntent = Intent(this, HdmiActivity::class.java)
+            hdmiIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            hdmiIntent.putExtra("finish", true)
+            startActivity(hdmiIntent)
+        } catch (_: Exception) {}
+
+        // 把Launcher自身带到前台
+        val launcherIntent = Intent(this, MainActivity::class.java)
+        launcherIntent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        startActivity(launcherIntent)
     }
 
     private fun forceExecutePolicy(policyStore: PolicyStore, force: Boolean = false, userTriggered: Boolean = false, forceRestart: Boolean = false) {
@@ -226,12 +267,10 @@ class MainActivity : AppCompatActivity() {
         val executor = LauncherExecutor(this)
         executor.cleanupBackgroundApps(keepPackages)
 
-        // 执行新策略 - HDMI模式在后台线程执行避免ANR
+        // 执行新策略 - HDMI模式现在使用Intent直接切换，无需后台线程
         if (policy.mode == "hdmi") {
-            ioExecutor.execute {
-                android.util.Log.d("MainActivity", "HDMI模式后台线程执行切换")
-                executor.execute(policy)
-            }
+            android.util.Log.d("MainActivity", "HDMI模式执行切换")
+            executor.execute(policy)
         } else if (policy.mode == "app" && forceRestart) {
             // APP模式 + 需要强制重启：先停止再启动（解决投屏码刷新问题）
             android.util.Log.d("MainActivity", "APP模式强制重启: ${policy.targetAppPackage}")
@@ -371,7 +410,24 @@ class MainActivity : AppCompatActivity() {
         val now = System.currentTimeMillis()
         val policy = policyStore.getPolicy()
 
-        // 先同步最新状态，然后再决定是否执行策略
+        // 立即执行策略，不等待网络I/O
+        // 开机时网络未就绪，等网络会浪费数秒黑屏时间
+        if (isPolicyValid(policy) && !policyStore.isPolicyPaused()
+            && !policyStore.isEscapeModeActive()
+            && now - lastPolicyExecutionTime > EXECUTION_COOLDOWN) {
+            android.util.Log.d("MainActivity", "${policy.mode}模式：立即执行策略，不等待网络")
+            lastPolicyExecutionTime = now
+            lastHdmiSwitchTime = now
+
+            val executor = LauncherExecutor(this)
+            when (policy.mode) {
+                "hdmi" -> executor.execute(policy)
+                "app" -> executor.launchApp(policy.targetAppPackage)
+            }
+            startKeepAliveService(policy)
+        }
+
+        // 网络I/O放后台异步执行，不阻塞策略执行
         ioExecutor.execute {
             val net = NetworkInfoProvider(this).collect()
             val api = RemoteApi(this, policyStore)
@@ -398,22 +454,10 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            // 同步完成后，在主线程更新状态并决定是否执行策略
+            // 同步完成后，在主线程更新状态
             mainHandler.post {
                 refreshStatus(policyStore)
-
-                // 检查是否需要执行策略
-                if (!policyStore.isEscapeModeActive() && now - lastPolicyExecutionTime > EXECUTION_COOLDOWN) {
-                    // 再次检查暂停状态（因为心跳同步后可能已更新）
-                    if (policyStore.isPolicyPaused()) {
-                        android.util.Log.d("MainActivity", "onResume: 策略已暂停，不执行")
-                    } else {
-                        // APP模式：强制重启APP以刷新投屏码
-                        // HDMI模式：正常执行（不需要重启）
-                        val forceRestart = policy.mode == "app"
-                        forceExecutePolicy(policyStore, forceRestart = forceRestart)
-                    }
-                }
+                // 策略已在onResume开头立即执行，此处只更新UI状态
             }
         }
     }

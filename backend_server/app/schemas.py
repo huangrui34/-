@@ -34,11 +34,23 @@ class DeviceHeartbeatIn(BaseModel):
     eth_mac: Optional[str] = None
     network_ssid: Optional[str] = None
     network_type: Optional[str] = None  # "wifi" | "ethernet" | "none"
+    wifi_rssi: Optional[int] = None
+    wifi_frequency: Optional[int] = None
+    wifi_link_speed: Optional[int] = None
+    ping_latency: Optional[int] = None
+    ping_packet_loss: Optional[int] = None
     installed_apps: Optional[str] = None
     ram_usage: Optional[str] = None # New field
     storage_usage: Optional[str] = None # New field
     status: str = "ok"
     message: Optional[str] = None
+
+class WifiConfigIn(BaseModel):
+    ssid: str
+    security: str = "wpa2_psk"       # "open" | "wpa2_psk" | "wpa2_enterprise"
+    password: Optional[str] = None
+    identity: Optional[str] = None    # for wpa2_enterprise
+    hidden: bool = False
 
 class DeviceOut(BaseModel):
     id: int
@@ -53,12 +65,18 @@ class DeviceOut(BaseModel):
     eth_mac: Optional[str]
     network_ssid: Optional[str]
     network_type: Optional[str] = None  # "wifi" | "ethernet" | "none"
+    wifi_rssi: Optional[int] = None
+    wifi_frequency: Optional[int] = None
+    wifi_link_speed: Optional[int] = None
+    ping_latency: Optional[int] = None
+    ping_packet_loss: Optional[int] = None
     installed_apps: Optional[str]
     ram_usage: Optional[str] # New field
     storage_usage: Optional[str] # New field
     online: bool
     policy_id: Optional[int]
     policy_paused: bool = False  # 策略暂停状态
+    wifi_config: Optional[str] = None  # JSON string or null
     class Config:
         from_attributes = True
 
