@@ -1030,6 +1030,148 @@ PROBLEMS = [
             "未来可能需要支持TLS、TTLS等认证方式。"
         ),
     },
+    {
+        "id": 24,
+        "title": "HDMI策略暂停后按键误触设置和密码键盘",
+        "severity": "高",
+        "symptom": (
+            "安卓6电视上，HDMI策略运行时点击「暂停策略」后，系统自动点击了设置按钮，"
+            "然后点击了弹出的密码键盘上的数字键。用户只是想暂停策略，结果被带入了设置页面。"
+            "安卓9电视上不存在此问题。"
+        ),
+        "cause": (
+            "HDMI调谐后，scheduleConfirmDialog()通过Runtime.exec发送DPAD按键"
+            "来自动确认系统弹窗。这些按键是异步执行的系统级按键注入，无法通过"
+            "handler.removeCallbacksAndMessages()取消。\n\n"
+            "当用户在调谐保护期(5秒)内点击暂停策略时：\n"
+            "1. HdmiActivity.onPause()调用handler.removeCallbacksAndMessages()清理待发按键\n"
+            "2. 但已经通过Runtime.exec提交给系统的按键无法撤回\n"
+            "3. 这些残留的DPAD_CENTER/DPAD_RIGHT按键在HdmiActivity退回主页后继续执行\n"
+            "4. 在MainActivity上，DPAD_CENTER正好点击了「设置」按钮\n"
+            "5. 后续的DPAD_RIGHT+DPAD_CENTER又点击了密码键盘"
+        ),
+        "attempts": [
+            {"name": "handler.removeCallbacksAndMessages", "desc": "只能取消handler队列中的待发Runnable，已exec的系统按键无法撤回", "success": False},
+            {"name": "dispatchKeyEvent拦截", "desc": "在MainActivity中拦截DPAD按键，但系统级按键注入绕过了Activity的dispatchKeyEvent", "success": False},
+        ],
+        "solution": (
+            "三层防护机制：\n\n"
+            "1. HdmiActivity添加isLeaving标志：\n"
+            "   onPause()时设置isLeaving=true，scheduleConfirmDialog中的每个postDelayed回调\n"
+            "   都先检查isLeaving，为true则跳过按键发送。这能阻止handler队列中尚未执行的按键。\n\n"
+            "2. MainActivity添加dispatchKeyEvent拦截：\n"
+            "   策略暂停后的5秒内(HDMI_PAUSE_KEY_SUPPRESS_MS)，拦截所有DPAD按键。\n"
+            "   这能阻止已exec但尚未到达Activity的系统按键。\n\n"
+            "3. bringLauncherToFront不再启动HdmiActivity：\n"
+            "   原来暂停后回到前台时会重新启动HdmiActivity(然后立即finish)导致新的按键发送，\n"
+            "   现在只将MainActivity带到前台，不再触发HdmiActivity生命周期。"
+        ),
+        "lesson": (
+            "Runtime.getRuntime().exec('input keyevent')是异步系统级按键注入，"
+            "一旦提交就不可取消。任何依赖定时按键的方案都必须有退出检查机制。"
+            "isLeaving标志+handler回调检查是最基本的防护，但对于已经exec的按键，"
+            "只能在目标Activity层做拦截。按键注入方案天然不可靠，应尽量减少使用。"
+        ),
+    },
+    {
+        "id": 25,
+        "title": "HDMI策略切换(HDMI1→HDMI2)时屏幕闪烁黑屏",
+        "severity": "高",
+        "symptom": (
+            "安卓6电视上，当策略从HDMI1切换到HDMI2时，屏幕会闪烁黑屏2-3次，"
+            "最终停留在HDMI1画面，无法成功切换到HDMI2。HDMI3也一样。"
+            "安卓9电视上不存在此问题。"
+        ),
+        "cause": (
+            "策略切换时存在3个触发源导致竞争：\n\n"
+            "1. MainActivity.onResume()：策略切换后回到前台时，读取旧策略值执行切换\n"
+            "2. policyUpdateReceiver第一次回调：RemoteApi心跳同步到新策略后广播通知\n"
+            "3. policyUpdateReceiver第二次回调：RemoteApi主动触发同步后的广播\n\n"
+            "问题1：onResume使用旧的SharedPreferences值（心跳还未更新），切换到旧端口HDMI1\n"
+            "问题2：HdmiActivity的onNewIntent使用inputId比较端口，但安卓6 Amlogic只有一个HDMI输入，"
+            "所有端口对应同一个inputId，导致端口变更检测失效\n\n"
+            "最终效果：HDMI1→HDMI2→HDMI1→HDMI2反复闪烁，由于onResume先执行旧策略，"
+            "最终画面停留在HDMI1。"
+        ),
+        "solution": (
+            "1. onNewIntent改用端口号比较：不再从inputId提取端口（因为安卓6只有一个inputId），\n"
+            "   而是直接比较intent中的EXTRA_HDMI_PORT，正确检测策略端口变更。\n\n"
+            "2. forceExecutePolicy中检查hdmi_foreground标志：\n"
+            "   如果HdmiActivity已在前台，发送onNewIntent复用singleTask实例，\n"
+            "   而不是创建新的HdmiActivity实例。\n\n"
+            "3. LauncherExecutor添加FLAG_ACTIVITY_CLEAR_TOP|FLAG_ACTIVITY_SINGLE_TOP：\n"
+            "   确保HdmiActivity被复用而不是堆叠。"
+        ),
+        "lesson": (
+            "安卓6 Amlogic芯片只有1个HDMI InputService(Hdmi1InputService/HW5)，"
+            "但物理上有3个HDMI端口。所有端口切换都用同一个inputId，"
+            "不能通过inputId判断端口是否变化，必须用端口号比较。"
+            "多个触发源同时执行策略时必须做好去重和优先级控制。"
+        ),
+    },
+    {
+        "id": 26,
+        "title": "HDMI线拔插后黑屏不恢复",
+        "severity": "高",
+        "symptom": (
+            "安卓6电视上，策略为HDMI2时，拔掉HDMI线再插回同一HDMI2口，画面黑屏不恢复。"
+            "更复杂的场景：拔掉HDMI2线，插到HDMI1口，再拔出插回HDMI2口，画面也是黑屏。"
+            "安卓9电视上不存在此问题。"
+        ),
+        "cause": (
+            "原方案使用BroadcastReceiver监听android.intent.action.HDMI_PLUGGED广播，"
+            "但安卓6 Amlogic设备上该广播从不触发（与问题1相同的原因）。\n\n"
+            "拔线后hasTuned仍为true，scheduleTune()跳过调谐（因为hasTuned检查），"
+            "HdmiActivity始终显示黑屏。插线后没有收到广播，无法触发重新调谐。\n\n"
+            "日志验证：拔插HDMI线时，logcat中完全看不到HDMI_PLUGGED相关日志，"
+            "但TvInputManagerService的onInputAdded/onInputRemoved/onInputStateChanged正常触发。"
+        ),
+        "solution": (
+            "使用TvInputManager.TvInputCallback替代BroadcastReceiver：\n\n"
+            "• onInputAdded：HDMI输入添加时，根据targetPort重新解析inputId并调谐\n"
+            "  （拔出HDMI2插入HDMI1时，系统移除Hdmi2InputService添加Hdmi1InputService，\n"
+            "  但策略targetPort=2，findInputIdForPort会查找当前存在的HDMI2输入，不存在则等待）\n\n"
+            "• onInputRemoved：当前HDMI输入被移除时，重置hasTuned=false和currentInputId=null，\n"
+            "  为后续onInputAdded重新调谐做准备\n\n"
+            "• onInputStateChanged：HDMI信号恢复(state=0)时，如果hasTuned=false则调度调谐\n\n"
+            "添加targetPort成员变量：跟踪策略指定的端口号，在onCreate和onNewIntent中更新，\n"
+            "确保TvInputCallback回调时能正确解析目标端口的inputId。"
+        ),
+        "lesson": (
+            "android.intent.action.HDMI_PLUGGED广播在不同芯片/系统版本上可靠性差异巨大。"
+            "TvInputManager.TvInputCallback是Android TV标准API，在所有支持TV Input Framework的"
+            "设备上都可靠工作。应该优先使用框架API而非系统广播。\n\n"
+            "关键发现：安卓6 Amlogic设备上，HDMI线从HDMI2口拔出插入HDMI1口时，\n"
+            "系统会移除Hdmi2InputService/HW6并添加Hdmi1InputService/HW5，\n"
+            "这是动态注册/注销的，不是固定的。所以必须动态查找inputId，不能缓存。"
+        ),
+    },
+    {
+        "id": 27,
+        "title": "管理后台更新/暂停按钮无反馈导致重复点击",
+        "severity": "中",
+        "symptom": (
+            "管理后台点击「更新」或「暂停」按钮后，界面没有即时反馈，用户以为没有点击成功，"
+            "反复点击导致弹出多个alert弹窗，操作混乱。"
+        ),
+        "cause": (
+            "bindPolicy()和togglePolicyPause()函数中，点击按钮后直接发起fetch请求，\n"
+            "没有禁用按钮也没有显示loading状态。网络请求可能需要1-2秒，\n"
+            "期间按钮仍可点击，用户会重复提交请求。"
+        ),
+        "solution": (
+            "为两个按钮添加loading状态和防重复点击：\n\n"
+            "1. 更新按钮：点击后文字变为「下发中...」，按钮disabled=true\n"
+            "2. 暂停/继续按钮：点击后文字变为「暂停中...」/「继续中...」，按钮disabled=true\n"
+            "3. 请求完成（成功或失败）后恢复按钮原文字和可用状态\n"
+            "4. 失败时恢复按钮原始文字，避免状态错乱"
+        ),
+        "lesson": (
+            "所有涉及网络请求的按钮都必须有loading状态和防重复点击机制。"
+            "用户无法感知后台操作进度时，会本能地重复点击。"
+            "按钮disabled+文字变更是最简单有效的反馈方式。"
+        ),
+    },
 ]
 
 # ========== 生成文档 ==========
@@ -1075,7 +1217,7 @@ def generate():
 
     info = doc.add_paragraph()
     info.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = info.add_run("最后更新：2026年4月30日")
+    run = info.add_run("最后更新：2026年5月3日")
     run.font.size = Pt(12)
     run.font.color.rgb = RGBColor.from_string(COLOR_TEXT_LIGHT)
 

@@ -86,6 +86,77 @@ def set_table_style(table):
 
 WORK_LOG = [
     {
+        "date": "2026-05-03",
+        "summary": "HDMI暂停按键误触修复、策略切换闪烁修复、HDMI拔插黑屏修复、离线设备显示优化、管理后台按钮loading状态",
+        "tasks": [
+            {
+                "type": "Bug修复",
+                "title": "HDMI策略暂停后按键误触设置和密码键盘",
+                "description": "安卓6电视上暂停HDMI策略后，系统自动点击设置按钮和密码键盘。Runtime.exec按键注入无法取消导致",
+                "details": [
+                    "三层防护: isLeaving标志阻止handler待发按键, dispatchKeyEvent拦截已exec按键, bringLauncherToFront不再启动HdmiActivity",
+                    "HdmiActivity.onPause: 设置isLeaving=true, 清理handler队列",
+                    "MainActivity: 策略暂停后5秒内拦截DPAD按键(HDMI_PAUSE_KEY_SUPPRESS_MS)",
+                    "KeepAliveForegroundService: 策略暂停时只更新通知，不拉回主页",
+                ],
+                "status": "已完成",
+                "files": ["HdmiActivity.kt", "MainActivity.kt", "KeepAliveForegroundService.kt"]
+            },
+            {
+                "type": "Bug修复",
+                "title": "HDMI策略切换(HDMI1→HDMI2)屏幕闪烁黑屏",
+                "description": "安卓6电视切换HDMI端口时闪烁2-3次最终停留在旧端口，onNewIntent用inputId比较端口失效",
+                "details": [
+                    "onNewIntent改用端口号比较: 直接比较EXTRA_HDMI_PORT，不再从inputId提取端口",
+                    "安卓6 Amlogic只有1个HDMI InputService，所有端口同一inputId，inputId比较失效",
+                    "forceExecutePolicy检查hdmi_foreground: HdmiActivity已在前台时发送onNewIntent复用实例",
+                    "LauncherExecutor添加FLAG_ACTIVITY_CLEAR_TOP|FLAG_ACTIVITY_SINGLE_TOP",
+                ],
+                "status": "已完成",
+                "files": ["HdmiActivity.kt", "MainActivity.kt", "LauncherExecutor.kt"]
+            },
+            {
+                "type": "Bug修复",
+                "title": "HDMI线拔插后黑屏不恢复",
+                "description": "安卓6电视拔插HDMI线后画面黑屏，BroadcastReceiver不触发，改用TvInputCallback",
+                "details": [
+                    "TvInputManager.TvInputCallback替代HDMI_PLUGGED BroadcastReceiver",
+                    "onInputAdded: HDMI输入添加时根据targetPort重新解析inputId并调谐",
+                    "onInputRemoved: 当前HDMI输入移除时重置hasTuned和currentInputId",
+                    "onInputStateChanged: HDMI信号恢复(state=0)时调度调谐",
+                    "添加targetPort变量跟踪策略指定端口",
+                    "安卓6上HDMI_PLUGGED广播从不触发，TvInputCallback可靠工作",
+                ],
+                "status": "已完成",
+                "files": ["HdmiActivity.kt"]
+            },
+            {
+                "type": "功能优化",
+                "title": "离线设备管理页面显示优化",
+                "description": "离线设备隐藏信号质量(良好/5GHz/Mbps)和延迟/丢包数据，保留IP/MAC地址",
+                "details": [
+                    "后端: 离线设备清除wifi_rssi/frequency/link_speed/latency/loss字段",
+                    "前端: renderWifiQuality对离线设备返回空字符串",
+                    "删除WiFi推送功能(WifiConfigManager/相关API/弹窗)",
+                ],
+                "status": "已完成",
+                "files": ["main.py", "schemas.py", "models.py", "index.html"]
+            },
+            {
+                "type": "功能优化",
+                "title": "管理后台更新/暂停按钮添加loading状态",
+                "description": "按钮点击后无反馈导致重复点击，添加禁用+状态文字防止重复操作",
+                "details": [
+                    "更新按钮: 点击后显示\"下发中...\"并禁用",
+                    "暂停/继续按钮: 点击后显示\"暂停中...\"/\"继续中...\"并禁用",
+                    "失败时恢复按钮原文字，避免状态错乱",
+                ],
+                "status": "已完成",
+                "files": ["index.html"]
+            },
+        ]
+    },
+    {
         "date": "2026-04-30",
         "summary": "设置页面焦点高亮、WiFi企业级自动识别、一键部署SSE进度流、WiFi页面焦点高亮",
         "tasks": [
