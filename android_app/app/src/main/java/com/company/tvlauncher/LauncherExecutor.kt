@@ -285,7 +285,13 @@ class LauncherExecutor(private val context: Context) {
             android.util.Log.d(TAG, "方式1: 启动HdmiActivity，port=$port")
             val intent = Intent(context, HdmiActivity::class.java)
             intent.putExtra(HdmiActivity.EXTRA_HDMI_PORT, port)
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // FLAG_ACTIVITY_NEW_TASK: Service/Receiver启动Activity时必须
+            // FLAG_ACTIVITY_CLEAR_TOP + FLAG_ACTIVITY_SINGLE_TOP: 复用singleTask实例，触发onNewIntent
+            intent.addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
+            )
             context.startActivity(intent)
             android.util.Log.d(TAG, "HdmiActivity已启动")
             android.util.Log.d(TAG, "========== HDMI$port 切换完成(HdmiActivity) ==========")

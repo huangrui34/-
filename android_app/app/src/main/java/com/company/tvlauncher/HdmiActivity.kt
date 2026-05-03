@@ -135,17 +135,34 @@ class HdmiActivity : Activity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        val newInputId = resolveInputId()
-        if (newInputId != null && newInputId != currentInputId) {
-            currentInputId = newInputId
-            savedInputId = newInputId
+        val newPort = intent?.getIntExtra(EXTRA_HDMI_PORT, 0) ?: 0
+        val currentPort = currentInputId?.let {
+            // 从inputId中提取端口号，如HW5=1, HW6=2
+            val hwMatch = Regex("""/HW(\d+)""").find(it)
+            hwMatch?.groupValues?.get(1)?.toIntOrNull()?.let { hw -> hw - 4 }
+        } ?: 0
+
+        // 用端口号判断策略是否变化，不用inputId（因为TV可能只有一个HDMI输入）
+        isLeaving = false  // 重置，允许调谐
+        if (newPort > 0 && newPort != currentPort) {
+            val newInputId = resolveInputId()
+            if (newInputId != null) {
+                currentInputId = newInputId
+                savedInputId = newInputId
+            }
             hasTuned = false
-            Log.d(TAG, "onNewIntent - 输入变更: $currentInputId, 需要重新调谐")
+            Log.d(TAG, "onNewIntent - 端口变更: HDMI$currentPort -> HDMI$newPort, 需要重新调谐")
+            scheduleTune()
+        } else {
+            Log.d(TAG, "onNewIntent - 端口未变化(HDMI$newPort), 跳过重新调谐")
         }
     }
 
     override fun onResume() {
         super.onResume()
+        // 设置HDMI前台标志，供MainActivity判断是否需要重复启动
+        getSharedPreferences("tv_policy", Context.MODE_PRIVATE)
+            .edit().putBoolean("hdmi_foreground", true).apply()
         Log.d(TAG, "onResume - 当前输入: $currentInputId, hasTuned=$hasTuned, hasFocus=$hasFocus")
 
         // 延迟调谐，确保Activity完全到前台
@@ -169,6 +186,8 @@ class HdmiActivity : Activity() {
         Log.d(TAG, "onPause - 标记离开，取消待发送按键事件")
         isLeaving = true
         hasTuned = false
+        getSharedPreferences("tv_policy", Context.MODE_PRIVATE)
+            .edit().putBoolean("hdmi_foreground", false).apply()
         handler.removeCallbacksAndMessages(null)
         tvView?.reset()
     }

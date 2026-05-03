@@ -52,28 +52,20 @@ class MainActivity : AppCompatActivity() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == "com.company.tvlauncher.POLICY_UPDATED") {
                 android.util.Log.d("MainActivity", "===== 收到策略更新广播 =====")
-                // 先同步最新的策略状态（包括暂停状态），再执行
-                ioExecutor.execute {
-                    val policyStore = PolicyStore(this@MainActivity)
-                    val api = RemoteApi(this@MainActivity, policyStore)
-                    val net = NetworkInfoProvider(this@MainActivity).collect()
-
-                    // 立即执行心跳同步，获取最新策略和暂停状态
-                    val heartbeatSuccess = api.heartbeat(net)
-                    val isPaused = policyStore.isPolicyPaused()
-                    android.util.Log.d("MainActivity", "心跳同步完成: success=$heartbeatSuccess, isPaused=$isPaused")
-
-                    // 在主线程检查暂停状态并决定是否执行策略
-                    mainHandler.post {
-                        refreshStatus(policyStore)
-                        if (isPaused) {
-                            android.util.Log.d("MainActivity", "===== 策略已暂停，切回主页 =====")
-                            // 暂停策略时：把Launcher带到前台，停止HDMI，关闭投屏APP
-                            bringLauncherToFront()
-                        } else {
-                            android.util.Log.d("MainActivity", "===== 策略未暂停，执行策略 =====")
-                            forceExecutePolicy(policyStore, force = true, userTriggered = true)
-                        }
+                // 心跳已经通过RemoteApi.heartbeat()同步了最新策略到SharedPreferences
+                // 不再在这里重复执行策略，避免与onResume重复触发HDMI切换
+                val policyStore = PolicyStore(this@MainActivity)
+                val isPaused = policyStore.isPolicyPaused()
+                mainHandler.post {
+                    refreshStatus(policyStore)
+                    if (isPaused) {
+                        android.util.Log.d("MainActivity", "===== 策略已暂停，切回主页 =====")
+                        bringLauncherToFront()
+                    } else {
+                        android.util.Log.d("MainActivity", "===== 策略未暂停，重新执行策略 =====")
+                        // 使用force=true绕过冷却期，但只执行一次
+                        // 如果HdmiActivity正在运行且端口没变，forceExecutePolicy会跳过
+                        forceExecutePolicy(policyStore, force = true, userTriggered = true)
                     }
                 }
             }
@@ -267,10 +259,22 @@ class MainActivity : AppCompatActivity() {
         val executor = LauncherExecutor(this)
         executor.cleanupBackgroundApps(keepPackages)
 
-        // 执行新策略 - HDMI模式现在使用Intent直接切换，无需后台线程
+        // 执行新策略
         if (policy.mode == "hdmi") {
-            android.util.Log.d("MainActivity", "HDMI模式执行切换")
-            executor.execute(policy)
+            // HDMI模式：如果HdmiActivity已在前台，只通过onNewIntent通知端口变更
+            // 不重复启动新实例，避免闪烁
+            val hdmiFg = getSharedPreferences("tv_policy", Context.MODE_PRIVATE)
+                .getBoolean("hdmi_foreground", false)
+            if (hdmiFg) {
+                android.util.Log.d("MainActivity", "HdmiActivity已在前台，发送onNewIntent通知端口变更: HDMI${policy.targetHdmiPort}")
+                val intent = Intent(this, HdmiActivity::class.java)
+                intent.putExtra(HdmiActivity.EXTRA_HDMI_PORT, policy.targetHdmiPort)
+                intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                startActivity(intent)
+            } else {
+                android.util.Log.d("MainActivity", "HDMI模式执行切换")
+                executor.execute(policy)
+            }
         } else if (policy.mode == "app" && forceRestart) {
             // APP模式 + 需要强制重启：先停止再启动（解决投屏码刷新问题）
             android.util.Log.d("MainActivity", "APP模式强制重启: ${policy.targetAppPackage}")
@@ -432,20 +436,26 @@ class MainActivity : AppCompatActivity() {
 
         // 立即执行策略，不等待网络I/O
         // 开机时网络未就绪，等网络会浪费数秒黑屏时间
+        // HDMI模式：冷却期30秒内不重复执行（避免策略切换时重复启动HdmiActivity闪烁）
         if (isPolicyValid(policy) && !policyStore.isPolicyPaused()
             && !policyStore.isEscapeModeActive()
             && !inHdmiPauseTransition
             && now - lastPolicyExecutionTime > EXECUTION_COOLDOWN) {
-            android.util.Log.d("MainActivity", "${policy.mode}模式：立即执行策略，不等待网络")
-            lastPolicyExecutionTime = now
-            lastHdmiSwitchTime = now
+            // HDMI模式额外冷却：策略切换过程中不重复启动
+            if (policy.mode == "hdmi" && now - lastHdmiSwitchTime < HDMI_SWITCH_COOLDOWN) {
+                android.util.Log.d("MainActivity", "HDMI切换冷却中(${(now - lastHdmiSwitchTime)/1000}秒)，跳过策略执行")
+            } else {
+                android.util.Log.d("MainActivity", "${policy.mode}模式：立即执行策略，不等待网络")
+                lastPolicyExecutionTime = now
+                lastHdmiSwitchTime = now
 
-            val executor = LauncherExecutor(this)
-            when (policy.mode) {
-                "hdmi" -> executor.execute(policy)
-                "app" -> executor.launchApp(policy.targetAppPackage)
+                val executor = LauncherExecutor(this)
+                when (policy.mode) {
+                    "hdmi" -> executor.execute(policy)
+                    "app" -> executor.launchApp(policy.targetAppPackage)
+                }
+                startKeepAliveService(policy)
             }
-            startKeepAliveService(policy)
         }
 
         // 网络I/O放后台异步执行，不阻塞策略执行
