@@ -56,6 +56,7 @@ class HdmiActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private var pendingTuneRunnable: Runnable? = null
     private var tuneTimeMs: Long = 0L  // 调谐时间，用于保护期判断
+    private var targetPort: Int = 0    // 策略指定的HDMI端口号
 
     private val policyPauseReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -65,6 +66,53 @@ class HdmiActivity : Activity() {
                 handler.removeCallbacksAndMessages(null)
                 tvView?.reset()
                 finish()
+            }
+        }
+    }
+
+    // 监听TV输入设备的添加/移除/状态变化，处理HDMI物理插拔和端口切换
+    // 使用TvInputCallback而非BroadcastReceiver，因为android.intent.action.HDMI_PLUGGED
+    // 在部分设备(Amlogic安卓6)上不可靠，而TvInputCallback是Android TV标准API
+    private val tvInputCallback = object : TvInputManager.TvInputCallback() {
+        override fun onInputAdded(inputId: String) {
+            Log.d(TAG, "TV输入添加: $inputId, targetPort=$targetPort, currentInputId=$currentInputId")
+            if (isLeaving) return
+            val resolved = findInputIdForPort(targetPort)
+            if (resolved != null && resolved != currentInputId) {
+                Log.d(TAG, "HDMI输入变更: $currentInputId -> $resolved")
+                currentInputId = resolved
+                savedInputId = resolved
+            }
+            if (!hasTuned && currentInputId != null) {
+                Log.d(TAG, "HDMI输入添加，调度调谐")
+                scheduleTune()
+            }
+        }
+
+        override fun onInputRemoved(inputId: String) {
+            Log.d(TAG, "TV输入移除: $inputId, currentInputId=$currentInputId")
+            if (inputId == currentInputId) {
+                Log.d(TAG, "当前HDMI输入被移除，重置调谐状态")
+                hasTuned = false
+                tvView?.reset()
+                currentInputId = null
+            }
+        }
+
+        override fun onInputStateChanged(inputId: String, state: Int) {
+            // state=0: CONNECTED(信号可用), state=2: DISCONNECTED
+            Log.d(TAG, "TV输入状态变更: $inputId, state=$state, hasTuned=$hasTuned")
+            if (state != 0 || isLeaving) return
+
+            val resolved = findInputIdForPort(targetPort)
+            if (resolved != null) {
+                currentInputId = resolved
+                savedInputId = resolved
+            }
+
+            if (!hasTuned && currentInputId != null) {
+                Log.d(TAG, "HDMI信号恢复(state=0)，执行调谐")
+                scheduleTune()
             }
         }
     }
@@ -85,6 +133,7 @@ class HdmiActivity : Activity() {
         }
 
         listTvInputs()
+        targetPort = intent?.getIntExtra(EXTRA_HDMI_PORT, 1) ?: 1
 
         // 优先从intent获取inputId（新的切换请求）
         // 只有intent没有指定时才从静态变量恢复（Activity重建场景）
@@ -130,12 +179,14 @@ class HdmiActivity : Activity() {
         // 调谐将在onResume中延迟执行
 
         registerReceiver(policyPauseReceiver, IntentFilter("com.company.tvlauncher.POLICY_PAUSED"))
+        tvInputManager?.registerCallback(tvInputCallback, handler)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         val newPort = intent?.getIntExtra(EXTRA_HDMI_PORT, 0) ?: 0
+        if (newPort > 0) targetPort = newPort
         val currentPort = currentInputId?.let {
             // 从inputId中提取端口号，如HW5=1, HW6=2
             val hwMatch = Regex("""/HW(\d+)""").find(it)
@@ -203,6 +254,7 @@ class HdmiActivity : Activity() {
         super.onDestroy()
         Log.d(TAG, "onDestroy - 释放HDMI资源")
         try { unregisterReceiver(policyPauseReceiver) } catch (_: Exception) {}
+        tvInputManager?.unregisterCallback(tvInputCallback)
         pendingTuneRunnable?.let { handler.removeCallbacks(it) }
         handler.removeCallbacksAndMessages(null)
         tvView?.reset()
