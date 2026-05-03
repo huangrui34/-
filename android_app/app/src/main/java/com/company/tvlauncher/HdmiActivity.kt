@@ -487,8 +487,8 @@ class HdmiActivity : Activity() {
     private fun scheduleConfirmDialog() {
         // 第1步：1秒后发送确认键
         handler.postDelayed({
-            if (isLeaving) {
-                Log.d(TAG, "已离开HdmiActivity，跳过确认键")
+            if (isLeaving || !hasFocus) {
+                Log.d(TAG, "已离开或失去焦点，跳过确认键 (isLeaving=$isLeaving, hasFocus=$hasFocus)")
                 return@postDelayed
             }
             try {
@@ -500,8 +500,8 @@ class HdmiActivity : Activity() {
 
             // 第2步：确认后0.5秒，发送RIGHT+CENTER关闭残留通知
             handler.postDelayed({
-                if (isLeaving) {
-                    Log.d(TAG, "已离开HdmiActivity，跳过关闭通知按键")
+                if (isLeaving || !hasFocus) {
+                    Log.d(TAG, "已离开或失去焦点，跳过关闭通知按键 (isLeaving=$isLeaving, hasFocus=$hasFocus)")
                     return@postDelayed
                 }
                 try {

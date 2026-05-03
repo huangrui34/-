@@ -145,7 +145,16 @@ class KeepAliveForegroundService : Service() {
                             }
                         }
                         "hdmi" -> {
-                            consecutiveFailures = 0
+                            // HDMI模式：检查HdmiActivity是否在前台
+                            val hdmiFg = getSharedPreferences("tv_policy", Context.MODE_PRIVATE)
+                                .getBoolean("hdmi_foreground", false)
+                            if (!hdmiFg) {
+                                android.util.Log.d(TAG, "HdmiActivity不在前台，重新执行HDMI策略")
+                                executor.execute(policy)
+                                updateNotification()
+                            } else {
+                                consecutiveFailures = 0
+                            }
                         }
                     }
                 } catch (e: Exception) {

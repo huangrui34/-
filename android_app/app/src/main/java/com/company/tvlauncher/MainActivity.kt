@@ -222,14 +222,17 @@ class MainActivity : AppCompatActivity() {
             lastHdmiSwitchTime = now
         } else {
             // 自动触发：需要检查冷却期
-            // HDMI模式：检查30秒冷却期（避免自动循环）
-            if (policy.mode == "hdmi" && now - lastHdmiSwitchTime < HDMI_SWITCH_COOLDOWN) {
+            // HDMI模式：如果HdmiActivity不在前台，允许立即恢复不受冷却期限制
+            val hdmiFg = getSharedPreferences("tv_policy", Context.MODE_PRIVATE)
+                .getBoolean("hdmi_foreground", true)
+            if (policy.mode == "hdmi" && hdmiFg && now - lastHdmiSwitchTime < HDMI_SWITCH_COOLDOWN) {
                 android.util.Log.d("MainActivity", "HDMI切换冷却中(${(now - lastHdmiSwitchTime)/1000}秒)，跳过自动执行")
                 return
             }
 
-            // 防抖检查：非强制模式下，5秒内不重复执行
-            if (!force && now - lastPolicyExecutionTime < EXECUTION_COOLDOWN) {
+            // 防抖检查：HDMI恢复不受限制，其他模式5秒内不重复执行
+            val hdmiNeedsRecovery = policy.mode == "hdmi" && !hdmiFg
+            if (!hdmiNeedsRecovery && !force && now - lastPolicyExecutionTime < EXECUTION_COOLDOWN) {
                 android.util.Log.d("MainActivity", "策略执行冷却中(${(now - lastPolicyExecutionTime)/1000}秒)，跳过")
                 return
             }
@@ -436,25 +439,38 @@ class MainActivity : AppCompatActivity() {
 
         // 立即执行策略，不等待网络I/O
         // 开机时网络未就绪，等网络会浪费数秒黑屏时间
-        // HDMI模式：冷却期30秒内不重复执行（避免策略切换时重复启动HdmiActivity闪烁）
         if (isPolicyValid(policy) && !policyStore.isPolicyPaused()
             && !policyStore.isEscapeModeActive()
-            && !inHdmiPauseTransition
-            && now - lastPolicyExecutionTime > EXECUTION_COOLDOWN) {
-            // HDMI模式额外冷却：策略切换过程中不重复启动
-            if (policy.mode == "hdmi" && now - lastHdmiSwitchTime < HDMI_SWITCH_COOLDOWN) {
-                android.util.Log.d("MainActivity", "HDMI切换冷却中(${(now - lastHdmiSwitchTime)/1000}秒)，跳过策略执行")
-            } else {
-                android.util.Log.d("MainActivity", "${policy.mode}模式：立即执行策略，不等待网络")
+            && !inHdmiPauseTransition) {
+
+            val hdmiFg = getSharedPreferences("tv_policy", Context.MODE_PRIVATE)
+                .getBoolean("hdmi_foreground", true)
+
+            if (policy.mode == "hdmi" && !hdmiFg) {
+                // HDMI模式 + HdmiActivity不在前台：立即恢复，不受任何冷却期限制
+                // 用户按HOME/BACK离开HdmiActivity后，必须立即拉回
+                android.util.Log.d("MainActivity", "HdmiActivity不在前台，立即恢复HDMI策略")
                 lastPolicyExecutionTime = now
                 lastHdmiSwitchTime = now
-
                 val executor = LauncherExecutor(this)
-                when (policy.mode) {
-                    "hdmi" -> executor.execute(policy)
-                    "app" -> executor.launchApp(policy.targetAppPackage)
-                }
+                executor.execute(policy)
                 startKeepAliveService(policy)
+            } else if (now - lastPolicyExecutionTime > EXECUTION_COOLDOWN) {
+                // 非HDMI恢复场景：正常冷却检查
+                if (policy.mode == "hdmi" && now - lastHdmiSwitchTime < HDMI_SWITCH_COOLDOWN) {
+                    android.util.Log.d("MainActivity", "HDMI切换冷却中(${(now - lastHdmiSwitchTime)/1000}秒)，跳过策略执行")
+                } else {
+                    android.util.Log.d("MainActivity", "${policy.mode}模式：立即执行策略，不等待网络")
+                    lastPolicyExecutionTime = now
+                    lastHdmiSwitchTime = now
+
+                    val executor = LauncherExecutor(this)
+                    when (policy.mode) {
+                        "hdmi" -> executor.execute(policy)
+                        "app" -> executor.launchApp(policy.targetAppPackage)
+                    }
+                    startKeepAliveService(policy)
+                }
             }
         }
 
@@ -792,22 +808,16 @@ class MainActivity : AppCompatActivity() {
                             }
                         }
                         "hdmi" -> {
-                            // HDMI模式：只进行状态监控，不重复执行HDMI切换
-                            // HDMI切换是一次性的，切换完成后不需要再干预
-
-                            val now = System.currentTimeMillis()
-                            val timeSinceSwitch = now - lastHdmiSwitchTime
-
-                            // HDMI切换后30秒内不做任何保活检查，让系统稳定
-                            if (timeSinceSwitch < HDMI_SWITCH_COOLDOWN) {
-                                android.util.Log.d("MainActivity", "HDMI切换后冷却期(${timeSinceSwitch/1000}秒)，跳过保活检查")
-                            } else {
-                                // 冷却期后，只检查播放器进程是否存在，不重复切换
-                                val isPlayerRunning = executor.isAppRunning(LauncherExecutor.HDMI_TV_PLAYER_PACKAGE)
-                                android.util.Log.d("MainActivity", "HDMI保活检查: 播放器运行=$isPlayerRunning")
-
-                                // 只有播放器完全被杀死时才启动（极罕见情况）
-                                // 正常情况下HDMI信号源面板由系统UI控制，不需要保活
+                            // HDMI模式：检查HdmiActivity是否在前台
+                            // 如果HdmiActivity不在前台（用户误按HOME/BACK），需要重新拉回
+                            val hdmiFg = getSharedPreferences("tv_policy", Context.MODE_PRIVATE)
+                                .getBoolean("hdmi_foreground", false)
+                            if (!hdmiFg && !policyStore.isPolicyPaused()) {
+                                android.util.Log.d("MainActivity", "HdmiActivity不在前台，重新执行HDMI策略")
+                                forceExecutePolicy(policyStore)
+                            } else if (hdmiFg) {
+                                // HdmiActivity在前台时才检查冷却期
+                                android.util.Log.d("MainActivity", "HDMI保活检查: hdmi_foreground=true")
                             }
                         }
                     }
