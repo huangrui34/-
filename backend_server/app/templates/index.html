@@ -2249,16 +2249,29 @@
         async function bindPolicy(deviceId) {
             const policyId = document.getElementById(`sel-${deviceId}`).value;
             if (!policyId) return alert('请先选择策略');
-            await fetch(`/api/v1/devices/${deviceId}/bind-policy/${policyId}`, { method: 'POST' });
-            // 下发成功，清除本地暂存的选择
-            delete pendingSelections[`sel-${deviceId}`];
-            alert('策略已下发');
-            loadData();
+            const btn = event.target;
+            const oldText = btn.innerText;
+            btn.innerText = "下发中...";
+            btn.disabled = true;
+            try {
+                await fetch(`/api/v1/devices/${deviceId}/bind-policy/${policyId}`, { method: 'POST' });
+                delete pendingSelections[`sel-${deviceId}`];
+                alert('策略已下发');
+                loadData();
+            } catch (e) {
+                alert('网络连接异常，请检查后端服务是否运行');
+            } finally {
+                btn.innerText = oldText;
+                btn.disabled = false;
+            }
         }
 
         async function togglePolicyPause(deviceId, isPaused) {
             const endpoint = isPaused ? 'resume-policy' : 'pause-policy';
             const action = isPaused ? '继续' : '暂停';
+            const btn = document.getElementById(`pause-resume-btn-${deviceId}`);
+            btn.innerText = `${action}中...`;
+            btn.disabled = true;
 
             try {
                 const resp = await fetch(`/api/v1/devices/${deviceId}/${endpoint}`, { method: 'POST' });
@@ -2266,7 +2279,6 @@
 
                 if (result.ok) {
                     const statusSpan = document.getElementById(`policy-status-${deviceId}`);
-                    const btn = document.getElementById(`pause-resume-btn-${deviceId}`);
 
                     if (isPaused) {
                         statusSpan.textContent = '运行中';
@@ -2284,9 +2296,13 @@
                     alert(`策略已${action}`);
                 } else {
                     alert(`操作失败: ${result.detail}`);
+                    btn.innerText = action;
                 }
             } catch (e) {
                 alert('网络连接异常，请检查后端服务是否运行');
+                btn.innerText = action;
+            } finally {
+                btn.disabled = false;
             }
         }
 
