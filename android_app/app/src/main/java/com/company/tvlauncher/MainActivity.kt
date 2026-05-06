@@ -445,16 +445,23 @@ class MainActivity : AppCompatActivity() {
 
             val hdmiFg = getSharedPreferences("tv_policy", Context.MODE_PRIVATE)
                 .getBoolean("hdmi_foreground", true)
+            // APP模式：Launcher在前台 = 目标APP不在前台，需要立即恢复
+            val appNeedsRecovery = policy.mode == "app" && isLauncherInForegroundCheck()
 
             if (policy.mode == "hdmi" && !hdmiFg) {
                 // HDMI模式 + HdmiActivity不在前台：立即恢复，不受任何冷却期限制
-                // 用户按HOME/BACK离开HdmiActivity后，必须立即拉回
                 android.util.Log.d("MainActivity", "HdmiActivity不在前台，立即恢复HDMI策略")
                 lastPolicyExecutionTime = now
                 lastHdmiSwitchTime = now
                 val executor = LauncherExecutor(this)
                 executor.execute(policy)
                 startKeepAliveService(policy)
+            } else if (appNeedsRecovery) {
+                // APP模式 + 目标APP不在前台：强制重启确保投屏码正常
+                android.util.Log.d("MainActivity", "目标APP不在前台，强制重启恢复APP策略")
+                lastPolicyExecutionTime = now
+                val executor = LauncherExecutor(this)
+                executor.forceStopAndRestart(policy.targetAppPackage)
             } else if (now - lastPolicyExecutionTime > EXECUTION_COOLDOWN) {
                 // 非HDMI恢复场景：正常冷却检查
                 if (policy.mode == "hdmi" && now - lastHdmiSwitchTime < HDMI_SWITCH_COOLDOWN) {
@@ -788,23 +795,18 @@ class MainActivity : AppCompatActivity() {
                     when (policy.mode) {
                         "app" -> {
                             // APP模式：检查目标APP是否在前台运行
-                            // 仅检查进程存在不够：用户按返回键后APP退到后台，进程还在但不在前台
-                            // 正确做法：如果Launcher自己在前台，说明目标APP不在前台，需要重新拉起
                             val isLauncherFg = isLauncherInForegroundCheck()
                             if (isLauncherFg) {
-                                // Launcher在前台 = 目标APP不在前台（可能退到后台或被关闭）
-                                // 无论进程是否存在，都需要把目标APP拉到前台
-                                android.util.Log.d("MainActivity", "Launcher在前台，目标APP不在前台，重新拉起: ${policy.targetAppPackage}")
-                                executor.launchApp(policy.targetAppPackage)
+                                // Launcher在前台 = 目标APP不在前台，强制重启确保投屏码正常
+                                android.util.Log.d("MainActivity", "Launcher在前台，强制重启目标APP: ${policy.targetAppPackage}")
+                                executor.forceStopAndRestart(policy.targetAppPackage)
                             } else {
                                 // Launcher不在前台 = 有其他应用在前台
-                                // 检查是否是目标APP，如果不是则需要拉起
                                 val currentPkg = getCurrentFocusPackage()
                                 if (currentPkg != null && currentPkg != policy.targetAppPackage && !EXCLUDED_PACKAGES.any { currentPkg.contains(it) }) {
-                                    android.util.Log.d("MainActivity", "当前前台是 $currentPkg 而非目标APP，重新拉起: ${policy.targetAppPackage}")
-                                    executor.launchApp(policy.targetAppPackage)
+                                    android.util.Log.d("MainActivity", "当前前台是 $currentPkg 而非目标APP，强制重启: ${policy.targetAppPackage}")
+                                    executor.forceStopAndRestart(policy.targetAppPackage)
                                 }
-                                // 如果当前前台就是目标APP，不需要操作
                             }
                         }
                         "hdmi" -> {

@@ -134,12 +134,20 @@ class KeepAliveForegroundService : Service() {
                                 targetPackage != "com.android.settings") {
 
                                 if (!executor.isAppRunning(targetPackage)) {
-                                    android.util.Log.d(TAG, "目标APP未运行，重新启动: $targetPackage")
+                                    android.util.Log.d(TAG, "目标APP未运行，启动: $targetPackage")
                                     executor.launchApp(targetPackage)
                                     lastLaunchedPackage = targetPackage
                                     consecutiveFailures++
                                     updateNotification()
                                 } else {
+                                    // APP进程在但可能不在前台，强制重启确保投屏码正常
+                                    val launcherFg = getSharedPreferences("tv_policy", Context.MODE_PRIVATE)
+                                        .getBoolean("launcher_foreground", true)
+                                    if (launcherFg) {
+                                        android.util.Log.d(TAG, "目标APP在后台，强制重启: $targetPackage")
+                                        executor.forceStopAndRestart(targetPackage)
+                                        updateNotification()
+                                    }
                                     consecutiveFailures = 0
                                 }
                             }

@@ -408,4 +408,50 @@ class LauncherExecutor(private val context: Context) {
             null
         }
     }
+
+    /**
+     * 热恢复：把后台APP拉到前台，不重新创建Activity
+     * 使用FLAG_ACTIVITY_REORDER_TO_FRONT保留APP状态（如投屏码），失败则回退到launchApp
+     */
+    fun bringAppToFront(packageName: String) {
+        android.util.Log.d(TAG, "热恢复APP到前台: $packageName")
+        recordLaunchTime()
+
+        // 方法1: Intent + FLAG_ACTIVITY_REORDER_TO_FRONT — 保留Activity状态
+        try {
+            val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
+            if (launchIntent != null) {
+                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                android.util.Log.d(TAG, "尝试REORDER_TO_FRONT: $packageName, intent=${launchIntent.component}")
+                context.startActivity(launchIntent)
+                android.util.Log.d(TAG, "REORDER_TO_FRONT恢复成功: $packageName")
+                return
+            } else {
+                android.util.Log.w(TAG, "getLaunchIntentForPackage返回null: $packageName")
+            }
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "REORDER_TO_FRONT失败: ${e.message}")
+        }
+
+        // 方法2: moveTaskToFront
+        try {
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val tasks = am.getRunningTasks(10)
+            if (tasks != null) {
+                for (task in tasks) {
+                    if (task.topActivity?.packageName == packageName) {
+                        am.moveTaskToFront(task.id, 0)
+                        android.util.Log.d(TAG, "moveTaskToFront成功: $packageName (taskId=${task.id})")
+                        return
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "moveTaskToFront失败: ${e.message}")
+        }
+
+        // 方法3: 回退到标准launchApp（冷启动）
+        android.util.Log.d(TAG, "热恢复失败，回退到冷启动: $packageName")
+        launchApp(packageName)
+    }
 }
