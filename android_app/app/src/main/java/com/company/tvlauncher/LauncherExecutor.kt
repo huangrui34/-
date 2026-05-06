@@ -125,27 +125,30 @@ class LauncherExecutor(private val context: Context) {
     }
 
     /**
-     * 强制停止并重新启动APP（用于投屏类APP刷新投屏码）
+     * 强制停止并重新启动APP
+     * 模拟用户在任务管理器上滑结束进程：am force-stop彻底杀进程，等1秒再启动
      */
     fun forceStopAndRestart(packageName: String) {
         android.util.Log.d(TAG, "强制停止并重启APP: $packageName")
         recordLaunchTime()
 
+        // 1. am force-stop彻底停止所有进程（主进程+子进程），效果等同任务管理器上滑
         try {
-            // 1. 先强制停止APP
-            Runtime.getRuntime().exec(arrayOf("am", "force-stop", packageName)).waitFor()
-            android.util.Log.d(TAG, "已停止APP: $packageName")
-
-            // 2. 等待短暂时间确保进程完全停止
-            Thread.sleep(500)
-
-            // 3. 重新启动APP
-            launchApp(packageName)
-            android.util.Log.d(TAG, "已重新启动APP: $packageName")
+            val process = Runtime.getRuntime().exec(arrayOf("am", "force-stop", packageName))
+            process.waitFor()
+            android.util.Log.d(TAG, "am force-stop完成: $packageName")
         } catch (e: Exception) {
-            android.util.Log.e(TAG, "强制重启APP失败: ${e.message}")
-            launchApp(packageName)
+            android.util.Log.w(TAG, "am force-stop失败: ${e.message}")
         }
+
+        // 2. 等待进程彻底死亡
+        try {
+            Thread.sleep(1000)
+        } catch (_: InterruptedException) {}
+
+        // 3. 重新启动APP
+        launchApp(packageName)
+        android.util.Log.d(TAG, "已重新启动APP: $packageName")
     }
 
     /**

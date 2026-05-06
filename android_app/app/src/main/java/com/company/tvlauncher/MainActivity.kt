@@ -795,17 +795,20 @@ class MainActivity : AppCompatActivity() {
                     when (policy.mode) {
                         "app" -> {
                             // APP模式：检查目标APP是否在前台运行
-                            val isLauncherFg = isLauncherInForegroundCheck()
-                            if (isLauncherFg) {
-                                // Launcher在前台 = 目标APP不在前台，强制重启确保投屏码正常
-                                android.util.Log.d("MainActivity", "Launcher在前台，强制重启目标APP: ${policy.targetAppPackage}")
-                                executor.forceStopAndRestart(policy.targetAppPackage)
+                            // 刚启动过的APP在冷却期内，跳过检查防止重复forceStop
+                            if (LauncherExecutor.isInLaunchCooldown()) {
+                                android.util.Log.d("MainActivity", "APP启动冷却期中，跳过保活检查")
                             } else {
-                                // Launcher不在前台 = 有其他应用在前台
-                                val currentPkg = getCurrentFocusPackage()
-                                if (currentPkg != null && currentPkg != policy.targetAppPackage && !EXCLUDED_PACKAGES.any { currentPkg.contains(it) }) {
-                                    android.util.Log.d("MainActivity", "当前前台是 $currentPkg 而非目标APP，强制重启: ${policy.targetAppPackage}")
+                                val isLauncherFg = isLauncherInForegroundCheck()
+                                if (isLauncherFg) {
+                                    android.util.Log.d("MainActivity", "Launcher在前台，强制重启目标APP: ${policy.targetAppPackage}")
                                     executor.forceStopAndRestart(policy.targetAppPackage)
+                                } else {
+                                    val currentPkg = getCurrentFocusPackage()
+                                    if (currentPkg != null && currentPkg != policy.targetAppPackage && !EXCLUDED_PACKAGES.any { currentPkg.contains(it) }) {
+                                        android.util.Log.d("MainActivity", "当前前台是 $currentPkg 而非目标APP，强制重启: ${policy.targetAppPackage}")
+                                        executor.forceStopAndRestart(policy.targetAppPackage)
+                                    }
                                 }
                             }
                         }
