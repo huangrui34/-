@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+
 class PolicyBase(BaseModel):
     name: str
     mode: str
@@ -22,7 +23,7 @@ class PolicyOut(PolicyBase):
 class DeviceRegister(BaseModel):
     device_sn: str
     device_name: str
-    room_name: Optional[str] = None # New field
+    room_name: Optional[str] = None
     model_name: Optional[str] = None
     wifi_mac: Optional[str] = None
     eth_mac: Optional[str] = None
@@ -33,15 +34,15 @@ class DeviceHeartbeatIn(BaseModel):
     wifi_mac: Optional[str] = None
     eth_mac: Optional[str] = None
     network_ssid: Optional[str] = None
-    network_type: Optional[str] = None  # "wifi" | "ethernet" | "none"
+    network_type: Optional[str] = None
     wifi_rssi: Optional[int] = None
     wifi_frequency: Optional[int] = None
     wifi_link_speed: Optional[int] = None
     ping_latency: Optional[int] = None
     ping_packet_loss: Optional[int] = None
     installed_apps: Optional[str] = None
-    ram_usage: Optional[str] = None # New field
-    storage_usage: Optional[str] = None # New field
+    ram_usage: Optional[str] = None
+    storage_usage: Optional[str] = None
     status: str = "ok"
     message: Optional[str] = None
 
@@ -49,7 +50,7 @@ class DeviceOut(BaseModel):
     id: int
     device_sn: str
     device_name: str
-    room_name: Optional[str] # New field
+    room_name: Optional[str]
     model_name: Optional[str]
     android_version: Optional[str] = None
     wifi_ip: Optional[str]
@@ -57,18 +58,18 @@ class DeviceOut(BaseModel):
     wifi_mac: Optional[str]
     eth_mac: Optional[str]
     network_ssid: Optional[str]
-    network_type: Optional[str] = None  # "wifi" | "ethernet" | "none"
+    network_type: Optional[str] = None
     wifi_rssi: Optional[int] = None
     wifi_frequency: Optional[int] = None
     wifi_link_speed: Optional[int] = None
     ping_latency: Optional[int] = None
     ping_packet_loss: Optional[int] = None
     installed_apps: Optional[str]
-    ram_usage: Optional[str] # New field
-    storage_usage: Optional[str] # New field
+    ram_usage: Optional[str]
+    storage_usage: Optional[str]
     online: bool
     policy_id: Optional[int]
-    policy_paused: bool = False  # 策略暂停状态
+    policy_paused: bool = False
     class Config:
         from_attributes = True
 
@@ -82,3 +83,39 @@ class OperationLogOut(BaseModel):
     created_at: datetime
     class Config:
         from_attributes = True
+
+
+# ========== 认证和用户 ==========
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class LoginResponse(BaseModel):
+    token: str
+    username: str
+    permissions: list[str]
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    permissions: list[str] = []
+    is_active: bool = True
+
+class UserUpdate(BaseModel):
+    password: Optional[str] = None
+    permissions: Optional[list[str]] = None
+    is_active: Optional[bool] = None
+
+class UserOut(BaseModel):
+    id: int
+    username: str
+    permissions: list[str]
+    is_active: bool
+    created_at: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
+class PasswordChange(BaseModel):
+    old_password: str
+    new_password: str

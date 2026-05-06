@@ -6,19 +6,114 @@ import time
 import asyncio
 import base64
 import json
+import hashlib
+import hmac
 from datetime import datetime, timedelta, timezone
-from fastapi import Depends, FastAPI, Header, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_
 
-from .db import Base, engine, get_db
-from .models import Device, DeviceHeartbeat, Policy, OperationLog
-from .schemas import DeviceHeartbeatIn, DeviceOut, DeviceRegister, PolicyCreate, PolicyOut, OperationLogOut
+from .db import Base, engine, get_db, SessionLocal
+from .models import (
+    Device, DeviceHeartbeat, Policy, OperationLog, User,
+    ALL_PERMISSIONS, ROLE_READONLY, ROLE_OPERATOR, ROLE_ADMIN,
+    PERM_DEVICE_VIEW, PERM_POLICY_VIEW, PERM_LOG_VIEW,
+    PERM_DEVICE_OP, PERM_REMOTE_CTRL, PERM_POLICY_MGMT,
+    PERM_APP_MGMT, PERM_ADB_CONSOLE, PERM_DEVICE_MGMT, PERM_USER_MGMT,
+)
+from .schemas import (
+    DeviceHeartbeatIn, DeviceOut, DeviceRegister,
+    PolicyCreate, PolicyOut, OperationLogOut,
+    LoginRequest, LoginResponse, UserCreate, UserUpdate, UserOut, PasswordChange,
+)
 
 Base.metadata.create_all(bind=engine)
+
+# ========== 认证核心 ==========
+
+JWT_SECRET = os.getenv("JWT_SECRET", "tv-launcher-secret-change-in-production")
+JWT_EXPIRE_HOURS = 24
+
+def hash_password(password: str) -> str:
+    """bcrypt风格密码哈希（使用hashlib+salt，无需额外依赖）"""
+    salt = secrets.token_hex(16)
+    h = hashlib.sha256((salt + password).encode()).hexdigest()
+    return f"{salt}${h}"
+
+def verify_password(password: str, password_hash: str) -> bool:
+    """验证密码"""
+    try:
+        salt, h = password_hash.split("$", 1)
+        return hmac.compare_digest(h, hashlib.sha256((salt + password).encode()).hexdigest())
+    except (ValueError, AttributeError):
+        return False
+
+def create_jwt(payload: dict) -> str:
+    """创建简单JWT token"""
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode()).decode()
+    payload["exp"] = (datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRE_HOURS)).isoformat()
+    payload_enc = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+    sig = hmac.new(JWT_SECRET.encode(), f"{header}.{payload_enc}".encode(), hashlib.sha256).hexdigest()
+    return f"{header}.{payload_enc}.{sig}"
+
+def verify_jwt(token: str) -> dict | None:
+    """验证JWT token，返回payload或None"""
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return None
+        header, payload_enc, sig = parts
+        expected_sig = hmac.new(JWT_SECRET.encode(), f"{header}.{payload_enc}".encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected_sig):
+            return None
+        payload = json.loads(base64.urlsafe_b64decode(payload_enc))
+        exp = datetime.fromisoformat(payload["exp"])
+        if exp < datetime.now(timezone.utc):
+            return None
+        return payload
+    except Exception:
+        return None
+
+def ensure_default_admin():
+    """首次启动时创建默认管理员账号"""
+    db = SessionLocal()
+    try:
+        if db.query(User).count() == 0:
+            admin = User(
+                username="admin",
+                password_hash=hash_password("admin123"),
+                permissions=json.dumps(ROLE_ADMIN),
+                is_active=True,
+            )
+            db.add(admin)
+            db.commit()
+            print("[auth] 已创建默认管理员账号: admin / admin123，请及时修改密码")
+    finally:
+        db.close()
+
+ensure_default_admin()
+
+def auth_admin(required_perm: str = None):
+    """管理端鉴权依赖工厂，返回Depends函数"""
+    def _auth(authorization: str = Header(default=""), db: Session = Depends(get_db)):
+        if not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="未登录")
+        token = authorization[7:]
+        payload = verify_jwt(token)
+        if not payload:
+            raise HTTPException(status_code=401, detail="登录已过期，请重新登录")
+        user = db.query(User).filter(User.username == payload.get("username")).first()
+        if not user or not user.is_active:
+            raise HTTPException(status_code=401, detail="账号已禁用")
+        if required_perm:
+            perms = json.loads(user.permissions) if user.permissions else []
+            if required_perm not in perms:
+                raise HTTPException(status_code=403, detail="无此操作权限")
+        return user
+    return _auth
 
 # 自动迁移：为旧数据库添加缺失的列
 def _migrate_db():
@@ -282,8 +377,117 @@ app.add_middleware(
 def health():
     return {"ok": True}
 
+# ========== 认证与用户管理端点 ==========
+
+@app.post("/api/v1/auth/login", response_model=LoginResponse)
+def login(payload: LoginRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == payload.username).first()
+    if not user or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="账号已禁用")
+    perms = json.loads(user.permissions) if user.permissions else []
+    token = create_jwt({"username": user.username, "user_id": user.id})
+    return LoginResponse(token=token, username=user.username, permissions=perms)
+
+@app.get("/api/v1/auth/me", response_model=LoginResponse)
+def get_current_user(user: User = Depends(auth_admin())):
+    perms = json.loads(user.permissions) if user.permissions else []
+    # 重新签发token以刷新过期时间
+    token = create_jwt({"username": user.username, "user_id": user.id})
+    return LoginResponse(token=token, username=user.username, permissions=perms)
+
+@app.post("/api/v1/auth/change-password")
+def change_password(payload: PasswordChange, user: User = Depends(auth_admin())):
+    if not verify_password(payload.old_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="原密码错误")
+    user.password_hash = hash_password(payload.new_password)
+    from .db import SessionLocal
+    db = SessionLocal()
+    try:
+        db.merge(user)
+        db.commit()
+    finally:
+        db.close()
+    return {"ok": True}
+
+@app.get("/api/v1/users", response_model=list[UserOut])
+def list_users(db: Session = Depends(get_db), _=Depends(auth_admin(PERM_USER_MGMT))):
+    users = db.query(User).order_by(User.id).all()
+    result = []
+    for u in users:
+        perms = json.loads(u.permissions) if u.permissions else []
+        result.append(UserOut(id=u.id, username=u.username, permissions=perms, is_active=u.is_active, created_at=u.created_at))
+    return result
+
+@app.post("/api/v1/users", response_model=UserOut)
+def create_user(payload: UserCreate, db: Session = Depends(get_db), _=Depends(auth_admin(PERM_USER_MGMT))):
+    if db.query(User).filter(User.username == payload.username).first():
+        raise HTTPException(status_code=400, detail="用户名已存在")
+    user = User(
+        username=payload.username,
+        password_hash=hash_password(payload.password),
+        permissions=json.dumps(payload.permissions),
+        is_active=payload.is_active,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return UserOut(id=user.id, username=user.username, permissions=payload.permissions, is_active=user.is_active, created_at=user.created_at)
+
+@app.put("/api/v1/users/{user_id}", response_model=UserOut)
+def update_user(user_id: int, payload: UserUpdate, db: Session = Depends(get_db), _=Depends(auth_admin(PERM_USER_MGMT))):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if payload.password:
+        user.password_hash = hash_password(payload.password)
+    if payload.permissions is not None:
+        user.permissions = json.dumps(payload.permissions)
+    if payload.is_active is not None:
+        user.is_active = payload.is_active
+    db.commit()
+    db.refresh(user)
+    perms = json.loads(user.permissions) if user.permissions else []
+    return UserOut(id=user.id, username=user.username, permissions=perms, is_active=user.is_active, created_at=user.created_at)
+
+@app.delete("/api/v1/users/{user_id}")
+def delete_user(user_id: int, db: Session = Depends(get_db), current_user: User = Depends(auth_admin(PERM_USER_MGMT))):
+    if current_user.id == user_id:
+        raise HTTPException(status_code=400, detail="不能删除自己的账号")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    db.delete(user)
+    db.commit()
+    return {"ok": True}
+
+@app.get("/api/v1/auth/permissions")
+def get_permissions(_=Depends(auth_admin())):
+    """返回所有可用权限列表及角色模板"""
+    return {
+        "permissions": [
+            {"key": PERM_DEVICE_VIEW, "label": "设备查看"},
+            {"key": PERM_POLICY_VIEW, "label": "策略查看"},
+            {"key": PERM_LOG_VIEW, "label": "日志查看"},
+            {"key": PERM_DEVICE_OP, "label": "设备操作"},
+            {"key": PERM_REMOTE_CTRL, "label": "远程控制"},
+            {"key": PERM_POLICY_MGMT, "label": "策略管理"},
+            {"key": PERM_APP_MGMT, "label": "应用管理"},
+            {"key": PERM_ADB_CONSOLE, "label": "ADB控制台"},
+            {"key": PERM_DEVICE_MGMT, "label": "设备管理"},
+            {"key": PERM_USER_MGMT, "label": "用户管理"},
+        ],
+        "roles": {
+            "readonly": {"label": "只读", "permissions": ROLE_READONLY},
+            "operator": {"label": "运维", "permissions": ROLE_OPERATOR},
+            "admin": {"label": "管理员", "permissions": ROLE_ADMIN},
+        }
+    }
+
+# ========== 策略端点 ==========
 @app.post("/api/v1/policies", response_model=PolicyOut)
-def create_policy(payload: PolicyCreate, db: Session = Depends(get_db)):
+def create_policy(payload: PolicyCreate, db: Session = Depends(get_db), _=Depends(auth_admin(PERM_POLICY_MGMT))):
     policy = Policy(**payload.model_dump())
     db.add(policy)
     db.commit()
@@ -291,7 +495,7 @@ def create_policy(payload: PolicyCreate, db: Session = Depends(get_db)):
     return policy
 
 @app.get("/api/v1/policies", response_model=list[PolicyOut])
-def list_policies(db: Session = Depends(get_db)):
+def list_policies(db: Session = Depends(get_db), _=Depends(auth_admin(PERM_POLICY_VIEW))):
     return db.query(Policy).order_by(Policy.id.desc()).all()
 
 @app.post("/api/v1/devices/register")
@@ -366,7 +570,7 @@ def device_heartbeat(
         "policy_paused": device.policy_paused
     }
 
-def push_policy_update_to_device(device: Device, db: Session, action_type: str = "policy_update"):
+def push_policy_update_to_device(device: Device, db: Session, action_type: str = "policy_update", operator: str = "admin"):
     """通过ADB推送策略更新到设备（包括暂停/恢复状态）"""
     try:
         ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
@@ -384,45 +588,45 @@ def push_policy_update_to_device(device: Device, db: Session, action_type: str =
                 adb_path, "-s", f"{ip}:5555", "shell",
                 "am broadcast -a com.company.tvlauncher.POLICY_UPDATED"
             ], timeout=5, capture_output=True)
-            log_operation(db, f"push_{action_type}", f"已推送{action_type}到 {device.device_name}", device.id, device.device_name)
+            log_operation(db, f"push_{action_type}", f"已推送{action_type}到 {device.device_name}", device.id, device.device_name, operator=operator)
             return True
     except Exception as e:
-        log_operation(db, f"push_{action_type}_failed", f"推送失败: {str(e)}", device.id, device.device_name)
+        log_operation(db, f"push_{action_type}_failed", f"推送失败: {str(e)}", device.id, device.device_name, operator=operator)
         return False
     return False
 
 @app.post("/api/v1/devices/{device_id}/pause-policy")
-def pause_policy(device_id: int, db: Session = Depends(get_db)):
+def pause_policy(device_id: int, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_DEVICE_OP))):
     """暂停设备的策略执行"""
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="设备未找到")
     device.policy_paused = True
     db.commit()
-    log_operation(db, "pause_policy", f"设备 {device.device_name} 的策略已暂停", device_id, device.device_name)
+    log_operation(db, "pause_policy", f"设备 {device.device_name} 的策略已暂停", device_id, device.device_name, operator=user.username)
     # 实时推送到设备
-    push_policy_update_to_device(device, db, "pause_policy")
+    push_policy_update_to_device(device, db, "pause_policy", operator=user.username)
     return {"ok": True, "policy_paused": True}
 
 @app.post("/api/v1/devices/{device_id}/resume-policy")
-def resume_policy(device_id: int, db: Session = Depends(get_db)):
+def resume_policy(device_id: int, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_DEVICE_OP))):
     """恢复设备的策略执行"""
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="设备未找到")
     device.policy_paused = False
     db.commit()
-    log_operation(db, "resume_policy", f"设备 {device.device_name} 的策略已恢复", device_id, device.device_name)
+    log_operation(db, "resume_policy", f"设备 {device.device_name} 的策略已恢复", device_id, device.device_name, operator=user.username)
     # 实时推送到设备
-    push_policy_update_to_device(device, db, "resume_policy")
+    push_policy_update_to_device(device, db, "resume_policy", operator=user.username)
     return {"ok": True, "policy_paused": False}
 
 @app.get("/api/v1/devices", response_model=list[DeviceOut])
-def list_devices(db: Session = Depends(get_db)):
+def list_devices(db: Session = Depends(get_db), _=Depends(auth_admin(PERM_DEVICE_VIEW))):
     return db.query(Device).order_by(Device.id.desc()).all()
 
 @app.get("/api/device/status")
-def device_status(ip: str, db: Session = Depends(get_db)):
+def device_status(ip: str, db: Session = Depends(get_db), _=Depends(auth_admin(PERM_DEVICE_VIEW))):
     device = (
         db.query(Device)
         .filter((Device.eth_ip == ip) | (Device.wifi_ip == ip))
@@ -449,7 +653,7 @@ def device_status(ip: str, db: Session = Depends(get_db)):
     }
 
 @app.get("/api/v1/deploy-tv-stream")
-def remote_deploy_stream(ip: str, server_url: str = None, db: Session = Depends(get_db)):
+def remote_deploy_stream(ip: str, server_url: str = None, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_DEVICE_MGMT))):
     """SSE stream version of deploy-tv, pushes real-time progress for each step."""
     import json as _json
 
@@ -580,7 +784,7 @@ def remote_deploy_stream(ip: str, server_url: str = None, db: Session = Depends(
                     device.policy_id = default_policy.id
                     db.commit()
 
-            log_operation(db, "deploy_success", f"已成功向 {ip} 部署 Launcher", device.id, device.device_name)
+            log_operation(db, "deploy_success", f"已成功向 {ip} 部署 Launcher", device.id, device.device_name, operator=user.username)
             yield sse({"step": "done", "ok": True, "message": f"部署成功！设备 {device.device_name} 已上线", "device_id": device.id, "device_name": device.device_name})
 
         except Exception as e:
@@ -589,14 +793,14 @@ def remote_deploy_stream(ip: str, server_url: str = None, db: Session = Depends(
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 @app.post("/api/v1/devices/{device_id}/bind-policy/{policy_id}")
-def bind_policy(device_id: int, policy_id: int, db: Session = Depends(get_db)):
+def bind_policy(device_id: int, policy_id: int, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_POLICY_MGMT))):
     device = db.query(Device).filter(Device.id == device_id).first()
     policy = db.query(Policy).filter(Policy.id == policy_id).first()
     if not device or not policy:
         raise HTTPException(status_code=404, detail="设备或策略未找到")
     device.policy_id = policy.id
     db.commit()
-    log_operation(db, "bind_policy", f"设备 {device.device_name} 绑定了策略 {policy.name}", device_id, device.device_name)
+    log_operation(db, "bind_policy", f"设备 {device.device_name} 绑定了策略 {policy.name}", device_id, device.device_name, operator=user.username)
 
     # 通过ADB推送策略更新到设备
     try:
@@ -615,25 +819,25 @@ def bind_policy(device_id: int, policy_id: int, db: Session = Depends(get_db)):
                 adb_path, "-s", f"{ip}:5555", "shell",
                 "am broadcast -a com.company.tvlauncher.POLICY_UPDATED"
             ], timeout=5, capture_output=True)
-            log_operation(db, "policy_push", f"已推送策略更新到 {device.device_name}", device_id, device.device_name)
+            log_operation(db, "policy_push", f"已推送策略更新到 {device.device_name}", device_id, device.device_name, operator=user.username)
     except Exception as e:
-        log_operation(db, "policy_push_failed", f"推送失败: {str(e)}", device_id, device.device_name)
+        log_operation(db, "policy_push_failed", f"推送失败: {str(e)}", device_id, device.device_name, operator=user.username)
 
     return {"ok": True}
 
 @app.post("/api/v1/devices/{device_id}/room")
-def update_room(device_id: int, room_name: str, db: Session = Depends(get_db)):
+def update_room(device_id: int, room_name: str, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_DEVICE_MGMT))):
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="设备未找到")
     old_room = device.room_name
     device.room_name = room_name
     db.commit()
-    log_operation(db, "update_room", f"设备 {device.device_name} 的会议室从 {old_room} 改为 {room_name}", device_id, device.device_name)
+    log_operation(db, "update_room", f"设备 {device.device_name} 的会议室从 {old_room} 改为 {room_name}", device_id, device.device_name, operator=user.username)
     return {"ok": True}
 
 @app.get("/api/v1/devices/{device_id}/screenshot")
-def get_screenshot(device_id: int, db: Session = Depends(get_db)):
+def get_screenshot(device_id: int, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_REMOTE_CTRL))):
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="设备未找到")
@@ -649,7 +853,7 @@ def get_screenshot(device_id: int, db: Session = Depends(get_db)):
         subprocess.run([adb_path, "connect", ip], timeout=5)
         subprocess.run([adb_path, "-s", f"{ip}:5555", "shell", "screencap", "-p", "/sdcard/screen.png"], check=True, timeout=10)
         subprocess.run([adb_path, "-s", f"{ip}:5555", "pull", "/sdcard/screen.png", local_path], check=True, timeout=15)
-        log_operation(db, "screenshot", f"截取设备 {device.device_name} 画面", device_id, device.device_name)
+        log_operation(db, "screenshot", f"截取设备 {device.device_name} 画面", device_id, device.device_name, operator=user.username)
         return {"ok": True, "url": f"/static/screenshots/device_{device_id}.png?t={int(time.time())}"}
     except Exception as e:
         return {"ok": False, "detail": str(e)}
@@ -787,7 +991,7 @@ scrcpy_manager = ScrcpyManager()
 
 # Scrcpy相关API端点
 @app.get("/api/v1/scrcpy/check")
-async def check_scrcpy_installation():
+async def check_scrcpy_installation(_=Depends(auth_admin(PERM_REMOTE_CTRL))):
     """检查Scrcpy安装状态"""
     scrcpy_path = get_scrcpy_path()
     if scrcpy_path:
@@ -805,7 +1009,7 @@ async def check_scrcpy_installation():
         }
 
 @app.post("/api/v1/scrcpy/auto-install")
-async def auto_install_scrcpy():
+async def auto_install_scrcpy(_=Depends(auth_admin(PERM_REMOTE_CTRL))):
     """自动下载安装Scrcpy"""
     import sys as _sys
     install_script = os.path.join(BASE_DIR, "install_scrcpy.py")
@@ -831,7 +1035,7 @@ async def auto_install_scrcpy():
         return {"ok": False, "detail": str(e)}
 
 @app.get("/api/v1/scrcpy/download-script")
-async def download_scrcpy_setup_script():
+async def download_scrcpy_setup_script(_=Depends(auth_admin(PERM_REMOTE_CTRL))):
     """生成其他电脑的一键安装Scrcpy脚本（.bat）"""
     script = '''@echo off
 chcp 65001 >nul 2>&1
@@ -913,7 +1117,7 @@ pause
     )
 
 @app.post("/api/v1/devices/{device_id}/scrcpy/start")
-async def start_scrcpy_session(device_id: int, db: Session = Depends(get_db)):
+async def start_scrcpy_session(device_id: int, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_REMOTE_CTRL))):
     """启动Scrcpy远程控制会话"""
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
@@ -926,30 +1130,30 @@ async def start_scrcpy_session(device_id: int, db: Session = Depends(get_db)):
     result = scrcpy_manager.start_scrcpy(device_id, ip)
     
     if result["ok"]:
-        log_operation(db, "start_scrcpy", f"启动Scrcpy远程控制会话", device_id, device.device_name)
+        log_operation(db, "start_scrcpy", f"启动Scrcpy远程控制会话", device_id, device.device_name, operator=user.username)
     
     return result
 
 @app.post("/api/v1/devices/{device_id}/scrcpy/stop")
-async def stop_scrcpy_session(device_id: int, db: Session = Depends(get_db)):
+async def stop_scrcpy_session(device_id: int, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_REMOTE_CTRL))):
     """停止Scrcpy远程控制会话"""
     result = scrcpy_manager.stop_scrcpy(device_id)
-    
+
     if result["ok"]:
         device = db.query(Device).filter(Device.id == device_id).first()
         if device:
-            log_operation(db, "stop_scrcpy", f"停止Scrcpy远程控制会话", device_id, device.device_name)
+            log_operation(db, "stop_scrcpy", f"停止Scrcpy远程控制会话", device_id, device.device_name, operator=user.username)
     
     return result
 
 @app.get("/api/v1/devices/{device_id}/scrcpy/status")
-async def get_scrcpy_status(device_id: int):
+async def get_scrcpy_status(device_id: int, _=Depends(auth_admin(PERM_REMOTE_CTRL))):
     """获取Scrcpy会话状态"""
     return scrcpy_manager.get_session_status(device_id)
 
 # 简化的ADB无线调试API（用于前端直接控制）
 @app.post("/api/v1/devices/{device_id}/adb/connect")
-async def adb_connect_device(device_id: int, db: Session = Depends(get_db)):
+async def adb_connect_device(device_id: int, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_ADB_CONSOLE))):
     """通过ADB连接到设备，连接后验证shell可用性"""
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
@@ -963,14 +1167,14 @@ async def adb_connect_device(device_id: int, db: Session = Depends(get_db)):
     result = adb_connect_and_verify(adb_path, ip)
 
     if result["ok"]:
-        log_operation(db, "adb_connect", f"ADB连接成功: {ip}", device_id, device.device_name)
+        log_operation(db, "adb_connect", f"ADB连接成功: {ip}", device_id, device.device_name, operator=user.username)
         return {"ok": True, "message": result["detail"]}
     else:
-        log_operation(db, "adb_connect_failed", result["detail"], device_id, device.device_name)
+        log_operation(db, "adb_connect_failed", result["detail"], device_id, device.device_name, operator=user.username)
         return {"ok": False, "detail": result["detail"]}
 
 @app.post("/api/v1/devices/{device_id}/adb/disconnect")
-async def adb_disconnect_device(device_id: int, db: Session = Depends(get_db)):
+async def adb_disconnect_device(device_id: int, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_ADB_CONSOLE))):
     """断开ADB连接"""
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
@@ -985,16 +1189,16 @@ async def adb_disconnect_device(device_id: int, db: Session = Depends(get_db)):
     try:
         result = subprocess.run([adb_path, "disconnect", f"{ip}:5555"], capture_output=True, text=True, timeout=10)
         
-        log_operation(db, "adb_disconnect", f"ADB断开连接: {ip}", device_id, device.device_name)
+        log_operation(db, "adb_disconnect", f"ADB断开连接: {ip}", device_id, device.device_name, operator=user.username)
         return {"ok": True, "message": f"已断开与 {ip}:5555 的连接"}
-    
+
     except Exception as e:
-        log_operation(db, "adb_disconnect_error", f"ADB断开连接异常: {str(e)}", device_id, device.device_name)
+        log_operation(db, "adb_disconnect_error", f"ADB断开连接异常: {str(e)}", device_id, device.device_name, operator=user.username)
         return {"ok": False, "detail": str(e)}
 
 # 生成Scrcpy启动命令（供用户手动执行）
 @app.get("/api/v1/devices/{device_id}/scrcpy/command")
-async def get_scrcpy_command(device_id: int, db: Session = Depends(get_db)):
+async def get_scrcpy_command(device_id: int, db: Session = Depends(get_db), _=Depends(auth_admin(PERM_REMOTE_CTRL))):
     """获取Scrcpy启动命令（供用户手动执行）"""
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
@@ -1024,7 +1228,7 @@ async def get_scrcpy_command(device_id: int, db: Session = Depends(get_db)):
     }
 
 @app.post("/api/v1/devices/{device_id}/input")
-def device_input(device_id: int, action: str, key: str = None, x: int = None, y: int = None, db: Session = Depends(get_db)):
+def device_input(device_id: int, action: str, key: str = None, x: int = None, y: int = None, db: Session = Depends(get_db), _=Depends(auth_admin(PERM_REMOTE_CTRL))):
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="设备未找到")
@@ -1051,7 +1255,7 @@ def device_input(device_id: int, action: str, key: str = None, x: int = None, y:
         return {"ok": False, "detail": str(e)}
 
 @app.post("/api/v1/devices/{device_id}/adb/shell")
-def adb_shell(device_id: int, command: str = "", db: Session = Depends(get_db)):
+def adb_shell(device_id: int, command: str = "", db: Session = Depends(get_db), _=Depends(auth_admin(PERM_ADB_CONSOLE))):
     """执行任意ADB命令并返回输出"""
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
@@ -1085,7 +1289,7 @@ def adb_shell(device_id: int, command: str = "", db: Session = Depends(get_db)):
         return {"ok": False, "output": str(e), "exit_code": -1}
 
 @app.post("/api/v1/scrcpy/connect-by-ip")
-def scrcpy_connect_by_ip(ip: str):
+def scrcpy_connect_by_ip(ip: str, _=Depends(auth_admin(PERM_REMOTE_CTRL))):
     """通过IP直接连接ADB并启动scrcpy"""
     if not ip or ip.strip() == "":
         raise HTTPException(status_code=400, detail="IP地址不能为空")
@@ -1117,7 +1321,7 @@ def scrcpy_connect_by_ip(ip: str):
         return {"ok": False, "message": str(e)}
 
 @app.post("/api/v1/devices/{device_id}/adb-install")
-def adb_install(device_id: int, db: Session = Depends(get_db)):
+def adb_install(device_id: int, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_APP_MGMT))):
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="设备未找到")
@@ -1139,13 +1343,13 @@ def adb_install(device_id: int, db: Session = Depends(get_db)):
         if result.returncode != 0:
              return {"ok": False, "detail": result.stderr or result.stdout}
         subprocess.run([adb_path, "-s", f"{ip}:5555", "shell", "am", "start", "-n", "com.company.tvlauncher/.MainActivity"], timeout=10)
-        log_operation(db, "adb_install", f"为设备 {device.device_name} 安装最新APK", device_id, device.device_name)
+        log_operation(db, "adb_install", f"为设备 {device.device_name} 安装最新APK", device_id, device.device_name, operator=user.username)
         return {"ok": True}
     except Exception as e:
         return {"ok": False, "detail": str(e)}
 
 @app.post("/api/v1/devices/{device_id}/silent-upgrade")
-def silent_upgrade(device_id: int, db: Session = Depends(get_db)):
+def silent_upgrade(device_id: int, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_APP_MGMT))):
     """静默升级管理应用到最新版本（不影响电视当前操作）
     使用 adb install -r 覆盖安装，APP正在运行时也能安装。
     安装完成后APP会自动恢复运行（保活服务+开机自启机制）。
@@ -1211,7 +1415,7 @@ def silent_upgrade(device_id: int, db: Session = Depends(get_db)):
         apk_name = os.path.basename(latest_apk)
         apk_size = os.path.getsize(latest_apk) // 1024
         apk_mtime = datetime.fromtimestamp(os.path.getmtime(latest_apk)).strftime("%Y-%m-%d %H:%M")
-        log_operation(db, "silent_upgrade", f"静默升级 {device.device_name}，APK: {apk_name} ({apk_size}KB, 构建: {apk_mtime})", device_id, device.device_name)
+        log_operation(db, "silent_upgrade", f"静默升级 {device.device_name}，APK: {apk_name} ({apk_size}KB, 构建: {apk_mtime})", device_id, device.device_name, operator=user.username)
         return {"ok": True, "message": f"升级成功！APK: {apk_name} ({apk_size}KB, 构建时间: {apk_mtime})，应用已自动重启"}
     except subprocess.TimeoutExpired:
         return {"ok": False, "detail": "安装超时（设备可能不响应）"}
@@ -1219,7 +1423,7 @@ def silent_upgrade(device_id: int, db: Session = Depends(get_db)):
         return {"ok": False, "detail": str(e)}
 
 @app.post("/api/v1/devices/{device_id}/uninstall")
-def uninstall_app(device_id: int, package_name: str, is_system: bool = False, db: Session = Depends(get_db)):
+def uninstall_app(device_id: int, package_name: str, is_system: bool = False, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_APP_MGMT))):
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="设备未找到")
@@ -1244,7 +1448,7 @@ def uninstall_app(device_id: int, package_name: str, is_system: bool = False, db
         output = (result.stdout or "") + (result.stderr or "")
         if "DELETE_FAILED_INTERNAL_ERROR" in output:
             return {"ok": False, "detail": "系统应用无法完全卸载，请使用冻结功能"}
-        log_operation(db, "uninstall", f"从设备 {device.device_name} 卸载应用 {package_name}{'(系统应用)' if is_system else ''}", device_id, device.device_name)
+        log_operation(db, "uninstall", f"从设备 {device.device_name} 卸载应用 {package_name}{'(系统应用)' if is_system else ''}", device_id, device.device_name, operator=user.username)
         return {"ok": True, "message": "卸载成功" if not is_system else "已停用该系统应用（恢复出厂设置可恢复）"}
     except Exception as e:
         return {"ok": False, "detail": str(e)}
@@ -1281,7 +1485,7 @@ AD_BLOCKLIST = [
 ]
 
 @app.post("/api/v1/devices/{device_id}/one-click-deploy")
-def one_click_deploy(device_id: int, db: Session = Depends(get_db)):
+def one_click_deploy(device_id: int, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_APP_MGMT))):
     """一键部署：检查ADB连接 → 安装APK → 卸载广告应用 → 设置默认HOME"""
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
@@ -1380,7 +1584,7 @@ def one_click_deploy(device_id: int, db: Session = Depends(get_db)):
     except Exception:
         logs.append("[启动] 启动Launcher失败(重启电视即可)")
 
-    log_operation(db, "one_click_deploy", f"一键部署完成: 安装APK+卸载{len(uninstalled)}个应用", device_id, device.device_name)
+    log_operation(db, "one_click_deploy", f"一键部署完成: 安装APK+卸载{len(uninstalled)}个应用", device_id, device.device_name, operator=user.username)
     return {
         "ok": True,
         "uninstalled": uninstalled,
@@ -1390,7 +1594,7 @@ def one_click_deploy(device_id: int, db: Session = Depends(get_db)):
     }
 
 @app.post("/api/v1/devices/{device_id}/check-adb")
-def check_adb(device_id: int, db: Session = Depends(get_db)):
+def check_adb(device_id: int, db: Session = Depends(get_db), _=Depends(auth_admin(PERM_DEVICE_OP))):
     """检查设备的ADB连接状态"""
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
@@ -1410,7 +1614,7 @@ def check_adb(device_id: int, db: Session = Depends(get_db)):
     }
 
 @app.post("/api/v1/devices/{device_id}/launch-app")
-def launch_app(device_id: int, package_name: str, db: Session = Depends(get_db)):
+def launch_app(device_id: int, package_name: str, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_DEVICE_OP))):
     """通过ADB启动指定应用"""
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
@@ -1437,13 +1641,13 @@ def launch_app(device_id: int, package_name: str, db: Session = Depends(get_db))
             )
             if result2.returncode != 0:
                 return {"ok": False, "detail": result2.stderr or result2.stdout or "启动失败"}
-        log_operation(db, "launch_app", f"在设备 {device.device_name} 启动应用 {package_name}", device_id, device.device_name)
+        log_operation(db, "launch_app", f"在设备 {device.device_name} 启动应用 {package_name}", device_id, device.device_name, operator=user.username)
         return {"ok": True, "message": f"已启动 {package_name}"}
     except Exception as e:
         return {"ok": False, "detail": str(e)}
 
 @app.post("/api/v1/devices/{device_id}/enable-app")
-def enable_app(device_id: int, package_name: str, db: Session = Depends(get_db)):
+def enable_app(device_id: int, package_name: str, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_DEVICE_OP))):
     """通过ADB重新启用已停用的应用（pm install-existing）"""
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
@@ -1463,14 +1667,14 @@ def enable_app(device_id: int, package_name: str, db: Session = Depends(get_db))
         )
         output = (result.stdout or "") + (result.stderr or "")
         if "Success" in output or result.returncode == 0:
-            log_operation(db, "enable_app", f"在设备 {device.device_name} 重新启用应用 {package_name}", device_id, device.device_name)
+            log_operation(db, "enable_app", f"在设备 {device.device_name} 重新启用应用 {package_name}", device_id, device.device_name, operator=user.username)
             return {"ok": True, "message": f"已启用 {package_name}"}
         return {"ok": False, "detail": output.strip() or "启用失败"}
     except Exception as e:
         return {"ok": False, "detail": str(e)}
 
 @app.post("/api/v1/adb/shell-by-ip")
-def adb_shell_by_ip(ip: str, command: str = ""):
+def adb_shell_by_ip(ip: str, command: str = "", _=Depends(auth_admin(PERM_ADB_CONSOLE))):
     """直接通过IP执行ADB命令（无需设备在数据库中）"""
     if not ip.strip():
         raise HTTPException(status_code=400, detail="IP不能为空")
@@ -1495,8 +1699,54 @@ def adb_shell_by_ip(ip: str, command: str = ""):
     except Exception as e:
         return {"ok": False, "output": str(e), "exit_code": -1}
 
+# ========== ADB快捷命令 ==========
+
+@app.post("/api/v1/devices/{device_id}/recovery")
+def reboot_recovery(device_id: int, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_ADB_CONSOLE))):
+    """重启设备到Recovery模式"""
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="设备未找到")
+    ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
+    if not ip or ip == "0.0.0.0":
+        raise HTTPException(status_code=400, detail="设备没有可用的IP地址")
+    adb_path = resolve_adb_path()
+    log_operation(db, "reboot_recovery", device_id=device_id, device_name=device.device_name, operator=user.username)
+    try:
+        subprocess.run([adb_path, "connect", f"{ip}:5555"], timeout=5, capture_output=True)
+        result = subprocess.run([adb_path, "-s", f"{ip}:5555", "reboot", "recovery"], capture_output=True, text=True, timeout=15)
+        output = result.stdout + result.stderr
+        return {"ok": True, "output": output.strip(), "exit_code": result.returncode}
+    except subprocess.TimeoutExpired:
+        return {"ok": True, "output": "命令已发送（设备正在重启到Recovery）", "exit_code": 0}
+    except Exception as e:
+        return {"ok": False, "output": str(e), "exit_code": -1}
+
+@app.post("/api/v1/devices/{device_id}/factory-reset")
+def factory_reset(device_id: int, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_ADB_CONSOLE))):
+    """恢复出厂设置"""
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="设备未找到")
+    ip = device.eth_ip if device.eth_ip and device.eth_ip != "0.0.0.0" else device.wifi_ip
+    if not ip or ip == "0.0.0.0":
+        raise HTTPException(status_code=400, detail="设备没有可用的IP地址")
+    adb_path = resolve_adb_path()
+    log_operation(db, "factory_reset", device_id=device_id, device_name=device.device_name, operator=user.username)
+    try:
+        subprocess.run([adb_path, "connect", f"{ip}:5555"], timeout=5, capture_output=True)
+        # 先恢复出厂设置，再重启
+        subprocess.run([adb_path, "-s", f"{ip}:5555", "shell", "am broadcast -a android.intent.action.MASTER_CLEAR"], capture_output=True, text=True, timeout=15)
+        result = subprocess.run([adb_path, "-s", f"{ip}:5555", "reboot"], capture_output=True, text=True, timeout=15)
+        output = result.stdout + result.stderr
+        return {"ok": True, "output": "恢复出厂设置命令已发送，设备将重启", "exit_code": 0}
+    except subprocess.TimeoutExpired:
+        return {"ok": True, "output": "恢复出厂设置命令已发送（设备正在重启）", "exit_code": 0}
+    except Exception as e:
+        return {"ok": False, "output": str(e), "exit_code": -1}
+
 @app.post("/api/v1/devices/{device_id}/install-uploaded")
-def install_uploaded(device_id: int, filename: str, db: Session = Depends(get_db)):
+def install_uploaded(device_id: int, filename: str, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_APP_MGMT))):
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="设备未找到")
@@ -1516,13 +1766,13 @@ def install_uploaded(device_id: int, filename: str, db: Session = Depends(get_db
         result = subprocess.run([adb_path, "-s", f"{ip}:5555", "install", "-r", apk_path], capture_output=True, text=True, timeout=120)
         if result.returncode != 0:
             return {"ok": False, "detail": result.stderr or result.stdout}
-        log_operation(db, "install_uploaded", f"为设备 {device.device_name} 安装上传的APK: {filename}", device_id, device.device_name)
+        log_operation(db, "install_uploaded", f"为设备 {device.device_name} 安装上传的APK: {filename}", device_id, device.device_name, operator=user.username)
         return {"ok": True, "message": "安装成功"}
     except Exception as e:
         return {"ok": False, "detail": str(e)}
 
 @app.post("/api/v1/upload-apk")
-async def upload_apk(file: UploadFile = File(...)):
+async def upload_apk(file: UploadFile = File(...), _=Depends(auth_admin(PERM_APP_MGMT))):
     if not file.filename.endswith('.apk'):
         raise HTTPException(status_code=400, detail="只支持 APK 文件")
     
@@ -1546,18 +1796,18 @@ def index():
         return "<h1>Dashboard Template Missing</h1>"
 
 @app.delete("/api/v1/policies/{policy_id}")
-def delete_policy(policy_id: int, db: Session = Depends(get_db)):
+def delete_policy(policy_id: int, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_POLICY_MGMT))):
     policy = db.query(Policy).filter(Policy.id == policy_id).first()
     if not policy:
         raise HTTPException(status_code=404, detail="策略未找到")
     policy_name = policy.name
     db.delete(policy)
     db.commit()
-    log_operation(db, "delete_policy", f"删除了策略: {policy_name}")
+    log_operation(db, "delete_policy", f"删除了策略: {policy_name}", operator=user.username)
     return {"ok": True}
 
 @app.delete("/api/v1/devices/{device_id}")
-def delete_device(device_id: int, db: Session = Depends(get_db)):
+def delete_device(device_id: int, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_DEVICE_MGMT))):
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="设备未找到")
@@ -1580,17 +1830,17 @@ def delete_device(device_id: int, db: Session = Depends(get_db)):
                 # 卸载失败时尝试清除数据
                 subprocess.run([adb_path, "-s", f"{device_ip}:5555", "shell",
                                "pm clear com.company.tvlauncher"], timeout=10, capture_output=True)
-            log_operation(db, "deregister_device", f"已通过ADB卸载设备APP: {device_name} (卸载{'成功' if uninstall_ok else '失败，已清除数据'})", device_id, device_name)
+            log_operation(db, "deregister_device", f"已通过ADB卸载设备APP: {device_name} (卸载{'成功' if uninstall_ok else '失败，已清除数据'})", device_id, device_name, operator=user.username)
         except Exception as e:
-            log_operation(db, "deregister_device_failed", f"ADB注销失败(设备可能离线): {str(e)}", device_id, device_name)
+            log_operation(db, "deregister_device_failed", f"ADB注销失败(设备可能离线): {str(e)}", device_id, device_name, operator=user.username)
 
     db.delete(device)
     db.commit()
-    log_operation(db, "delete_device", f"移除了设备: {device_name}", device_id, device_name)
+    log_operation(db, "delete_device", f"移除了设备: {device_name}", device_id, device_name, operator=user.username)
     return {"ok": True}
 
 @app.get("/api/v1/devices/connectivity-check")
-def connectivity_check(db: Session = Depends(get_db)):
+def connectivity_check(db: Session = Depends(get_db), _=Depends(auth_admin(PERM_DEVICE_VIEW))):
     """批量检测所有设备的 ping 和 ADB 连通状态（并行检测，快速返回）"""
     from concurrent.futures import ThreadPoolExecutor, as_completed
     devices = db.query(Device).all()
@@ -1663,11 +1913,11 @@ def connectivity_check(db: Session = Depends(get_db)):
     return results
 
 @app.get("/api/v1/logs", response_model=list[OperationLogOut])
-def list_logs(limit: int = 50, db: Session = Depends(get_db)):
+def list_logs(limit: int = 50, db: Session = Depends(get_db), _=Depends(auth_admin(PERM_LOG_VIEW))):
     return db.query(OperationLog).order_by(OperationLog.id.desc()).limit(limit).all()
 
 @app.delete("/api/v1/logs")
-def clear_logs(db: Session = Depends(get_db)):
+def clear_logs(db: Session = Depends(get_db), _=Depends(auth_admin(PERM_LOG_VIEW))):
     db.query(OperationLog).delete()
     db.commit()
     return {"ok": True}
@@ -1713,7 +1963,35 @@ manager = ConnectionManager()
 
 # 实时屏幕流WebSocket端点
 @app.websocket("/ws/devices/{device_id}/screen")
-async def websocket_screen_stream(websocket: WebSocket, device_id: int):
+async def websocket_screen_stream(websocket: WebSocket, device_id: int, token: str = ""):
+    # WebSocket不支持Header，通过query参数验证JWT
+    ws_user = None
+    if token:
+        payload = verify_jwt(token)
+        if payload:
+            from .db import SessionLocal as _SL
+            _db = _SL()
+            try:
+                ws_user = _db.query(User).filter(User.username == payload.get("username")).first()
+                if ws_user and ws_user.is_active:
+                    perms = json.loads(ws_user.permissions) if ws_user.permissions else []
+                    if PERM_REMOTE_CTRL not in perms:
+                        await websocket.close(code=4003, reason="无此操作权限")
+                        return
+                else:
+                    await websocket.close(code=4001, reason="账号已禁用或不存在")
+                    return
+            finally:
+                _db.close()
+        else:
+            await websocket.close(code=4001, reason="登录已过期，请重新登录")
+            return
+    else:
+        await websocket.close(code=4001, reason="未登录")
+        return
+
+    ws_username = ws_user.username if ws_user else "websocket"
+
     await manager.connect(device_id, websocket)
     try:
         while True:
@@ -1737,7 +2015,7 @@ async def websocket_screen_stream(websocket: WebSocket, device_id: int):
                                     adb_path = resolve_adb_path()
                                     subprocess.run([adb_path, "connect", ip], timeout=5)
                                     subprocess.run([adb_path, "-s", f"{ip}:5555", "shell", "input", "tap", str(x), str(y)], timeout=5)
-                                    log_operation(db, "websocket_tap", f"通过WebSocket点击位置 ({x}, {y})", device_id, device.device_name)
+                                    log_operation(db, "websocket_tap", f"通过WebSocket点击位置 ({x}, {y})", device_id, device.device_name, operator=ws_username)
                     elif action == "key":
                         key = message.get("key")
                         if key:
@@ -1749,7 +2027,7 @@ async def websocket_screen_stream(websocket: WebSocket, device_id: int):
                                     adb_path = resolve_adb_path()
                                     subprocess.run([adb_path, "connect", ip], timeout=5)
                                     subprocess.run([adb_path, "-s", f"{ip}:5555", "shell", "input", "keyevent", key], timeout=5)
-                                    log_operation(db, "websocket_key", f"通过WebSocket发送按键: {key}", device_id, device.device_name)
+                                    log_operation(db, "websocket_key", f"通过WebSocket发送按键: {key}", device_id, device.device_name, operator=ws_username)
             except json.JSONDecodeError:
                 pass
     except WebSocketDisconnect:
@@ -1757,7 +2035,7 @@ async def websocket_screen_stream(websocket: WebSocket, device_id: int):
 
 # 屏幕截图流端点（供前端轮询）
 @app.get("/api/v1/devices/{device_id}/screen-stream")
-async def screen_stream(device_id: int, db: Session = Depends(get_db)):
+async def screen_stream(device_id: int, db: Session = Depends(get_db), _=Depends(auth_admin(PERM_REMOTE_CTRL))):
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="设备未找到")
@@ -1792,7 +2070,7 @@ async def screen_stream(device_id: int, db: Session = Depends(get_db)):
 
 # 鼠标控制端点
 @app.post("/api/v1/devices/{device_id}/mouse")
-async def mouse_control(device_id: int, action: str, x: int = None, y: int = None, db: Session = Depends(get_db)):
+async def mouse_control(device_id: int, action: str, x: int = None, y: int = None, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_REMOTE_CTRL))):
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="设备未找到")
@@ -1809,7 +2087,7 @@ async def mouse_control(device_id: int, action: str, x: int = None, y: int = Non
         if action == "tap":
             if x is not None and y is not None:
                 subprocess.run([adb_path, "-s", f"{ip}:5555", "shell", "input", "tap", str(x), str(y)], check=True, timeout=5)
-                log_operation(db, "mouse_tap", f"点击位置 ({x}, {y})", device_id, device.device_name)
+                log_operation(db, "mouse_tap", f"点击位置 ({x}, {y})", device_id, device.device_name, operator=user.username)
                 return {"ok": True, "message": f"已点击 ({x}, {y})"}
             else:
                 return {"ok": False, "detail": "缺少 x 或 y 坐标"}

@@ -2,6 +2,35 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, fun
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
 
+# 用户权限常量
+PERM_DEVICE_VIEW = "device_view"
+PERM_POLICY_VIEW = "policy_view"
+PERM_LOG_VIEW = "log_view"
+PERM_DEVICE_OP = "device_op"
+PERM_REMOTE_CTRL = "remote_ctrl"
+PERM_POLICY_MGMT = "policy_mgmt"
+PERM_APP_MGMT = "app_mgmt"
+PERM_ADB_CONSOLE = "adb_console"
+PERM_DEVICE_MGMT = "device_mgmt"
+PERM_USER_MGMT = "user_mgmt"
+
+ALL_PERMISSIONS = [
+    PERM_DEVICE_VIEW,
+    PERM_POLICY_VIEW,
+    PERM_LOG_VIEW,
+    PERM_DEVICE_OP,
+    PERM_REMOTE_CTRL,
+    PERM_POLICY_MGMT,
+    PERM_APP_MGMT,
+    PERM_ADB_CONSOLE,
+    PERM_DEVICE_MGMT,
+    PERM_USER_MGMT,
+]
+
+ROLE_READONLY = [PERM_DEVICE_VIEW]
+ROLE_OPERATOR = [PERM_DEVICE_VIEW, PERM_POLICY_VIEW, PERM_LOG_VIEW, PERM_DEVICE_OP, PERM_REMOTE_CTRL, PERM_POLICY_MGMT, PERM_APP_MGMT]
+ROLE_ADMIN = ALL_PERMISSIONS
+
 class Policy(Base):
     __tablename__ = "policies"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -60,4 +89,13 @@ class OperationLog(Base):
     action: Mapped[str] = mapped_column(String(64), nullable=False)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     operator: Mapped[str] = mapped_column(String(128), default="admin")
+    created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
+    permissions: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())

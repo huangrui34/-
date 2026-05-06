@@ -923,26 +923,51 @@
     </style>
 </head>
 <body>
-    <div class="container">
+    <!-- ========== 登录页 ========== -->
+    <div id="loginPage" style="display:none; min-height:100vh; align-items:center; justify-content:center; background:var(--gray-100);">
+        <div style="background:#fff; padding:40px; border-radius:12px; box-shadow:0 2px 12px rgba(0,0,0,0.1); width:380px;">
+            <h2 style="text-align:center; margin-bottom:8px; color:var(--gray-900);">TV Launcher 管理后台</h2>
+            <p style="text-align:center; margin-bottom:24px; color:var(--gray-500); font-size:13px;">请登录以继续操作</p>
+            <div id="loginError" style="display:none; background:var(--red-light); color:var(--red); padding:8px 12px; border-radius:6px; margin-bottom:12px; font-size:13px;"></div>
+            <input type="text" id="loginUsername" placeholder="用户名" style="width:100%; padding:10px 12px; border:1px solid var(--gray-300); border-radius:6px; margin-bottom:12px; font-size:14px;" onkeydown="if(event.key==='Enter')doLogin()">
+            <input type="password" id="loginPassword" placeholder="密码" style="width:100%; padding:10px 12px; border:1px solid var(--gray-300); border-radius:6px; margin-bottom:16px; font-size:14px;" onkeydown="if(event.key==='Enter')doLogin()">
+            <button onclick="doLogin()" style="width:100%; padding:10px; background:var(--blue); color:#fff; border:none; border-radius:6px; font-size:15px; cursor:pointer; font-weight:600;">登 录</button>
+        </div>
+    </div>
+
+    <!-- ========== 主内容 ========== -->
+    <div id="mainContent" class="container">
         <div class="header">
             <h1>Meeting TV Launcher</h1>
             <div class="header-actions">
                 <!-- 一键部署 -->
-                <div class="header-input-group">
+                <div class="header-input-group" data-perm="device_mgmt">
                     <input type="text" id="deployIp" placeholder="电视 IP 地址">
                     <button class="btn btn-success" style="border-radius: 0 6px 6px 0;" onclick="showDeployGuide()">一键部署上线</button>
                 </div>
                 <!-- 远程连接 -->
-                <div class="header-input-group">
+                <div class="header-input-group" data-perm="remote_ctrl">
                     <input type="text" id="scrcpyIpTop" placeholder="电视IP" style="width: 130px;">
                     <div class="input-divider"></div>
                     <input type="text" id="scrcpyPortTop" value="5555" style="width: 52px; text-align: center;">
                     <button class="btn" style="border-radius: 0 6px 6px 0; background: var(--indigo);" onclick="scrcpyConnectByIpTop()">远程连接</button>
                 </div>
                 <!-- ADB控制台 -->
-                <button class="btn" style="background: var(--gray-600);" onclick="openAdbConsole()">ADB 控制台</button>
+                <button class="btn" style="background: var(--gray-600);" onclick="openAdbConsole()" data-perm="adb_console">ADB 控制台</button>
                 <!-- 操作日志 -->
-                <button class="btn btn-outline" onclick="showLogs()">操作日志</button>
+                <button class="btn btn-outline" onclick="showLogs()" data-perm="log_view">操作日志</button>
+                <!-- 用户管理 -->
+                <button class="btn btn-outline" onclick="showUserManagement()" data-perm="user_mgmt" style="background:var(--purple);color:#fff;">账号管理</button>
+                <!-- 用户菜单 -->
+                <div style="position:relative; display:inline-block;">
+                    <button class="btn btn-outline" onclick="document.getElementById('userDropdown').classList.toggle('show')" style="padding:4px 12px;">
+                        <span id="userMenuInfo">用户</span> ▾
+                    </button>
+                    <div id="userDropdown" style="display:none; position:absolute; right:0; top:100%; background:#fff; border:1px solid var(--gray-200); border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.1); min-width:160px; z-index:200;">
+                        <a href="#" onclick="showChangePasswordDialog();document.getElementById('userDropdown').style.display='none';return false" style="display:block; padding:8px 16px; color:var(--gray-700); text-decoration:none; font-size:13px;">修改密码</a>
+                        <a href="#" onclick="doLogout();return false" style="display:block; padding:8px 16px; color:var(--red); text-decoration:none; font-size:13px; border-top:1px solid var(--gray-200);">退出登录</a>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -1130,7 +1155,11 @@
         <div class="modal-content" style="width: 880px; max-width: 95vw;">
             <div class="adb-console-header">
                 <h3>ADB 命令控制台</h3>
-                <button class="btn btn-outline btn-sm" onclick="closeAdbConsole()">关闭</button>
+                <div style="display:flex; gap:6px;">
+                    <button class="btn btn-sm" style="background:var(--orange);color:#fff;" onclick="adbConsoleRecovery()">进入Recovery</button>
+                    <button class="btn btn-sm" style="background:var(--red);color:#fff;" onclick="adbConsoleFactoryReset()">恢复出厂</button>
+                    <button class="btn btn-outline btn-sm" onclick="closeAdbConsole()">关闭</button>
+                </div>
             </div>
             <!-- 设备选择 + IP直连 + 命令输入 -->
             <div class="adb-input-row">
@@ -1313,6 +1342,303 @@
     </div>
 
     <script>
+        // ========== 认证管理 ==========
+        let currentUser = null; // {username, permissions}
+
+        function getAuthToken() {
+            return localStorage.getItem('auth_token') || '';
+        }
+
+        function setAuthToken(token) {
+            localStorage.setItem('auth_token', token);
+        }
+
+        function clearAuth() {
+            localStorage.removeItem('auth_token');
+            currentUser = null;
+        }
+
+        function hasPerm(perm) {
+            return currentUser && currentUser.permissions && currentUser.permissions.includes(perm);
+        }
+
+        function authHeaders() {
+            const token = getAuthToken();
+            return token ? {'Authorization': `Bearer ${token}`} : {};
+        }
+
+        async function authFetch(url, options = {}) {
+            options.headers = {...(options.headers || {}), ...authHeaders()};
+            const resp = await fetch(url, options);
+            if (resp.status === 401 || resp.status === 403) {
+                const data = await resp.json().catch(() => ({}));
+                if (resp.status === 401) {
+                    clearAuth();
+                    showLoginPage(data.detail || '登录已过期');
+                }
+                throw {status: resp.status, detail: data.detail || '无权限'};
+            }
+            return resp;
+        }
+
+        function showLoginPage(errorMsg) {
+            document.getElementById('mainContent').style.display = 'none';
+            document.getElementById('loginPage').style.display = 'flex';
+            if (errorMsg) {
+                document.getElementById('loginError').textContent = errorMsg;
+                document.getElementById('loginError').style.display = 'block';
+            }
+        }
+
+        function showMainContent() {
+            document.getElementById('loginPage').style.display = 'none';
+            document.getElementById('mainContent').style.display = 'block';
+            updateUserMenu();
+        }
+
+        async function doLogin() {
+            const username = document.getElementById('loginUsername').value.trim();
+            const password = document.getElementById('loginPassword').value;
+            if (!username || !password) {
+                document.getElementById('loginError').textContent = '请输入用户名和密码';
+                document.getElementById('loginError').style.display = 'block';
+                return;
+            }
+            try {
+                const resp = await fetch('/api/v1/auth/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username, password})
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    document.getElementById('loginError').textContent = data.detail || '登录失败';
+                    document.getElementById('loginError').style.display = 'block';
+                    return;
+                }
+                setAuthToken(data.token);
+                currentUser = {username: data.username, permissions: data.permissions};
+                showMainContent();
+                loadData();
+            } catch(e) {
+                document.getElementById('loginError').textContent = '网络错误';
+                document.getElementById('loginError').style.display = 'block';
+            }
+        }
+
+        function doLogout() {
+            clearAuth();
+            showLoginPage('');
+        }
+
+        function updateUserMenu() {
+            const el = document.getElementById('userMenuInfo');
+            if (currentUser) {
+                el.textContent = currentUser.username;
+            }
+            // 隐藏无权限的功能
+            applyPermissions();
+        }
+
+        function applyPermissions() {
+            document.querySelectorAll('[data-perm]').forEach(el => {
+                const perm = el.getAttribute('data-perm');
+                if (perm && !hasPerm(perm)) {
+                    el.style.display = 'none';
+                } else {
+                    el.style.display = '';
+                }
+            });
+        }
+
+        async function checkAuth() {
+            const token = getAuthToken();
+            if (!token) { showLoginPage(''); return false; }
+            try {
+                const resp = await fetch('/api/v1/auth/me', {headers: authHeaders()});
+                if (!resp.ok) { clearAuth(); showLoginPage(''); return false; }
+                const data = await resp.json();
+                setAuthToken(data.token); // refresh token
+                currentUser = {username: data.username, permissions: data.permissions};
+                return true;
+            } catch(e) {
+                clearAuth(); showLoginPage(''); return false;
+            }
+        }
+
+        // ========== 密码修改 ==========
+        function showChangePasswordDialog() {
+            document.getElementById('changePwdError').style.display = 'none';
+            document.getElementById('changePwdOld').value = '';
+            document.getElementById('changePwdNew').value = '';
+            document.getElementById('changePwdDialog').style.display = 'flex';
+        }
+        async function doChangePassword() {
+            const oldPwd = document.getElementById('changePwdOld').value;
+            const newPwd = document.getElementById('changePwdNew').value;
+            if (!oldPwd || !newPwd) { document.getElementById('changePwdError').textContent='请填写完整'; document.getElementById('changePwdError').style.display='block'; return; }
+            try {
+                const resp = await authFetch('/api/v1/auth/change-password', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({old_password: oldPwd, new_password: newPwd})
+                });
+                const data = await resp.json();
+                document.getElementById('changePwdDialog').style.display = 'none';
+                alert('密码修改成功');
+            } catch(e) {
+                document.getElementById('changePwdError').textContent = e.detail || '修改失败';
+                document.getElementById('changePwdError').style.display = 'block';
+            }
+        }
+
+        // ========== 用户管理 ==========
+        async function loadUsers() {
+            try {
+                const resp = await authFetch('/api/v1/users');
+                const users = await resp.json();
+                const tbody = document.getElementById('userTableBody');
+                tbody.innerHTML = '';
+                users.forEach(u => {
+                    const permLabels = u.permissions.map(p => permLabel(p)).join(', ') || '无';
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `<td>${u.username}</td><td style="font-size:12px;">${permLabels}</td><td>${u.is_active?'启用':'禁用'}</td><td>
+                        <button onclick="editUser(${u.id},'${u.username}',${JSON.stringify(u.permissions).replace(/"/g,'&quot;')},${u.is_active})" class="btn-sm" style="background:var(--blue);color:#fff;">编辑</button>
+                        ${u.username !== 'admin' ? `<button onclick="deleteUser(${u.id},'${u.username}')" class="btn-sm" style="background:var(--red);color:#fff;margin-left:4px;">删除</button>` : ''}
+                    </td>`;
+                    tbody.appendChild(tr);
+                });
+            } catch(e) {}
+        }
+
+        const PERM_LABELS = {
+            'device_view':'设备查看','policy_view':'策略查看','log_view':'日志查看',
+            'device_op':'设备操作','remote_ctrl':'远程控制','policy_mgmt':'策略管理',
+            'app_mgmt':'应用管理','adb_console':'ADB控制台','device_mgmt':'设备管理','user_mgmt':'用户管理'
+        };
+        function permLabel(k) { return PERM_LABELS[k] || k; }
+
+        const ROLE_TEMPLATES = {
+            'readonly': ['device_view'],
+            'operator': ['device_view','policy_view','log_view','device_op','remote_ctrl','policy_mgmt','app_mgmt'],
+            'admin': ['device_view','policy_view','log_view','device_op','remote_ctrl','policy_mgmt','app_mgmt','adb_console','device_mgmt','user_mgmt']
+        };
+
+        function showAddUserDialog() {
+            document.getElementById('userDialogTitle').textContent = '添加用户';
+            document.getElementById('userDialogId').value = '';
+            document.getElementById('userDialogUsername').value = '';
+            document.getElementById('userDialogUsername').disabled = false;
+            document.getElementById('userDialogPassword').value = '';
+            document.getElementById('userDialogActive').checked = true;
+            document.getElementById('userDialogError').style.display = 'none';
+            setPermCheckboxes(ROLE_TEMPLATES.admin);
+            document.getElementById('userDialog').style.display = 'flex';
+        }
+
+        function editUser(id, username, permissions, isActive) {
+            document.getElementById('userDialogTitle').textContent = '编辑用户';
+            document.getElementById('userDialogId').value = id;
+            document.getElementById('userDialogUsername').value = username;
+            document.getElementById('userDialogUsername').disabled = true;
+            document.getElementById('userDialogPassword').value = '';
+            document.getElementById('userDialogActive').checked = isActive;
+            document.getElementById('userDialogError').style.display = 'none';
+            setPermCheckboxes(permissions);
+            document.getElementById('userDialog').style.display = 'flex';
+        }
+
+        function setPermCheckboxes(perms) {
+            document.querySelectorAll('.perm-checkbox').forEach(cb => {
+                cb.checked = perms.includes(cb.value);
+            });
+        }
+
+        function getPermCheckboxes() {
+            return Array.from(document.querySelectorAll('.perm-checkbox:checked')).map(cb => cb.value);
+        }
+
+        function applyRoleTemplate(role) {
+            setPermCheckboxes(ROLE_TEMPLATES[role] || []);
+        }
+
+        async function saveUser() {
+            const id = document.getElementById('userDialogId').value;
+            const username = document.getElementById('userDialogUsername').value.trim();
+            const password = document.getElementById('userDialogPassword').value;
+            const isActive = document.getElementById('userDialogActive').checked;
+            const permissions = getPermCheckboxes();
+            if (!username) { document.getElementById('userDialogError').textContent='请输入用户名'; document.getElementById('userDialogError').style.display='block'; return; }
+            try {
+                if (id) {
+                    // 编辑
+                    const body = {permissions, is_active: isActive};
+                    if (password) body.password = password;
+                    await authFetch(`/api/v1/users/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+                } else {
+                    // 新增
+                    if (!password) { document.getElementById('userDialogError').textContent='请输入密码'; document.getElementById('userDialogError').style.display='block'; return; }
+                    await authFetch('/api/v1/users', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username, password, permissions, is_active: isActive})});
+                }
+                document.getElementById('userDialog').style.display = 'none';
+                loadUsers();
+            } catch(e) {
+                document.getElementById('userDialogError').textContent = e.detail || '保存失败';
+                document.getElementById('userDialogError').style.display = 'block';
+            }
+        }
+
+        async function deleteUser(id, username) {
+            if (!confirm(`确认删除用户 "${username}"？`)) return;
+            try {
+                await authFetch(`/api/v1/users/${id}`, {method:'DELETE'});
+                loadUsers();
+            } catch(e) { alert(e.detail || '删除失败'); }
+        }
+
+        // ========== ADB快捷命令 ==========
+        function showAdbShellWarning(deviceId, deviceName) {
+            document.getElementById('adbShellTarget').textContent = deviceName;
+            document.getElementById('adbShellError').style.display = 'none';
+            document.getElementById('adbShellInput').value = '';
+            document.getElementById('adbShellWarning').style.display = 'flex';
+            document.getElementById('adbShellDeviceId').value = deviceId;
+        }
+
+        async function executeAdbShell() {
+            const deviceId = document.getElementById('adbShellDeviceId').value;
+            const command = document.getElementById('adbShellInput').value.trim();
+            if (!command) return;
+            try {
+                const resp = await authFetch(`/api/v1/devices/${deviceId}/adb/shell?command=${encodeURIComponent(command)}`, {method:'POST'});
+                const data = await resp.json();
+                document.getElementById('adbShellOutput').textContent = data.output || '(无输出)';
+                document.getElementById('adbShellOutput').style.display = 'block';
+            } catch(e) {
+                document.getElementById('adbShellError').textContent = e.detail || '执行失败';
+                document.getElementById('adbShellError').style.display = 'block';
+            }
+        }
+
+        async function rebootRecovery(deviceId, deviceName) {
+            if (!confirm(`确认将 "${deviceName}" 重启到Recovery模式？\n设备将暂时不可用。`)) return;
+            try {
+                const resp = await authFetch(`/api/v1/devices/${deviceId}/recovery`, {method:'POST'});
+                const data = await resp.json();
+                alert(data.output || '命令已发送');
+            } catch(e) { alert(e.detail || '操作失败'); }
+        }
+
+        async function factoryReset(deviceId, deviceName) {
+            if (!confirm(`⚠ 此操作将清除 "${deviceName}" 所有数据并恢复出厂设置！\n此操作不可撤销！\n\n确认继续？`)) return;
+            const input = prompt('请输入"确认恢复"以继续：');
+            if (input !== '确认恢复') { if (input !== null) alert('输入不匹配，操作取消'); return; }
+            try {
+                const resp = await authFetch(`/api/v1/devices/${deviceId}/factory-reset`, {method:'POST'});
+                const data = await resp.json();
+                alert(data.output || '命令已发送');
+            } catch(e) { alert(e.detail || '操作失败'); }
+        }
+
         let allInstalledApps = new Set();
         let allDevices = [];
         let allPolicies = [];
@@ -1345,8 +1671,8 @@
             // 如果用户正在操作策略下拉框，跳过本次刷新
             if (isSelectActive()) return;
 
-            const policies = await (await fetch('/api/v1/policies')).json();
-            const devices = await (await fetch('/api/v1/devices')).json();
+            const policies = await (await authFetch('/api/v1/policies')).json();
+            const devices = await (await authFetch('/api/v1/devices')).json();
 
             // fetch完成后再次检查（fetch期间用户可能打开了下拉框）
             if (isSelectActive()) return;
@@ -1995,7 +2321,7 @@
         function closeRoomModal() { document.getElementById('roomModal').style.display = 'none'; }
         async function saveRoom() {
             const roomName = document.getElementById('rName').value;
-            const resp = await fetch(`/api/v1/devices/${currentRoomDeviceId}/room?room_name=${encodeURIComponent(roomName)}`, { method: 'POST' });
+            const resp = await authFetch(`/api/v1/devices/${currentRoomDeviceId}/room?room_name=${encodeURIComponent(roomName)}`, { method: 'POST' });
             if (resp.ok) { closeRoomModal(); loadData(); }
         }
 
@@ -2012,7 +2338,7 @@
         async function sendKey(key) {
             if (!currentRemoteDeviceId) return;
             try {
-                await fetch(`/api/v1/devices/${currentRemoteDeviceId}/input?action=key&key=${key}`, { method: 'POST' });
+                await authFetch(`/api/v1/devices/${currentRemoteDeviceId}/input?action=key&key=${key}`, { method: 'POST' });
             } catch(e) {}
         }
 
@@ -2084,7 +2410,7 @@
             btn.innerHTML = '连接中...';
 
             try {
-                const resp = await fetch(`/api/v1/scrcpy/connect-by-ip?ip=${encodeURIComponent(ip)}`, { method: 'POST' });
+                const resp = await authFetch(`/api/v1/scrcpy/connect-by-ip?ip=${encodeURIComponent(ip)}`, { method: 'POST' });
                 const result = await resp.json();
                 if (result.ok) {
                     alert(result.message);
@@ -2101,6 +2427,7 @@
 
         // ==================== ADB 控制台 ====================
         async function openAdbConsole() {
+            if (!confirm('⚠ ADB Shell可执行任意系统命令\n操作不当可能导致设备异常或数据丢失\n请确认你了解所执行命令的作用\n\n是否继续？')) return;
             document.getElementById('adbConsoleModal').style.display = 'block';
             // 填充设备列表（使用缓存数据）
             const select = document.getElementById('adbConsoleDevice');
@@ -2129,6 +2456,39 @@
             document.getElementById('adbConsoleCmdInput').focus();
         }
 
+        async function adbConsoleRecovery() {
+            const deviceId = document.getElementById('adbConsoleDevice').value;
+            if (!deviceId) { alert('请先选择设备'); return; }
+            const device = allDevices.find(d => d.id == deviceId);
+            const name = device ? (device.room_name || device.device_name) : '设备';
+            if (!confirm(`确认将 "${name}" 重启到Recovery模式？\n设备将暂时不可用。`)) return;
+            try {
+                const resp = await authFetch(`/api/v1/devices/${deviceId}/recovery`, {method:'POST'});
+                const data = await resp.json();
+                document.getElementById('adbConsoleOutput').textContent = data.output || '命令已发送';
+            } catch(e) { alert(e.detail || '操作失败'); }
+        }
+
+        async function adbConsoleFactoryReset() {
+            const deviceId = document.getElementById('adbConsoleDevice').value;
+            if (!deviceId) { alert('请先选择设备'); return; }
+            const device = allDevices.find(d => d.id == deviceId);
+            const name = device ? (device.room_name || device.device_name) : '设备';
+            if (!confirm(`⚠ 此操作将清除 "${name}" 所有数据并恢复出厂设置！\n此操作不可撤销！\n\n确认继续？`)) return;
+            const input = prompt('请输入"确认恢复"以继续：');
+            if (input !== '确认恢复') { if (input !== null) alert('输入不匹配，操作取消'); return; }
+            try {
+                const resp = await authFetch(`/api/v1/devices/${deviceId}/factory-reset`, {method:'POST'});
+                const data = await resp.json();
+                document.getElementById('adbConsoleOutput').textContent = data.output || '命令已发送';
+            } catch(e) { alert(e.detail || '操作失败'); }
+        }
+
+        function showUserManagement() {
+            document.getElementById('userMgmtDialog').style.display = 'flex';
+            loadUsers();
+        }
+
         async function executeAdbConsoleCmd() {
             const deviceId = document.getElementById('adbConsoleDevice').value;
             const directIp = document.getElementById('adbConsoleIpInput').value.trim();
@@ -2146,9 +2506,9 @@
             try {
                 let resp;
                 if (directIp) {
-                    resp = await fetch(`/api/v1/adb/shell-by-ip?ip=${encodeURIComponent(directIp)}&command=${encodeURIComponent(cmd)}`, { method: 'POST' });
+                    resp = await authFetch(`/api/v1/adb/shell-by-ip?ip=${encodeURIComponent(directIp)}&command=${encodeURIComponent(cmd)}`, { method: 'POST' });
                 } else {
-                    resp = await fetch(`/api/v1/devices/${deviceId}/adb/shell?command=${encodeURIComponent(cmd)}`, { method: 'POST' });
+                    resp = await authFetch(`/api/v1/devices/${deviceId}/adb/shell?command=${encodeURIComponent(cmd)}`, { method: 'POST' });
                 }
                 const result = await resp.json();
                 if (result.ok) {
@@ -2224,7 +2584,7 @@
                 target_app_package: document.getElementById('pPackage').value,
                 target_hdmi_port: parseInt(document.getElementById('pHdmi').value)
             };
-            const resp = await fetch('/api/v1/policies', {
+            const resp = await authFetch('/api/v1/policies', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
@@ -2234,14 +2594,14 @@
 
         async function deletePolicy(id) {
             if (confirm('确定删除此策略？')) {
-                await fetch(`/api/v1/policies/${id}`, { method: 'DELETE' });
+                await authFetch(`/api/v1/policies/${id}`, { method: 'DELETE' });
                 loadData();
             }
         }
 
         async function deleteDevice(id) {
             if (confirm('确定移除此设备？')) {
-                await fetch(`/api/v1/devices/${id}`, { method: 'DELETE' });
+                await authFetch(`/api/v1/devices/${id}`, { method: 'DELETE' });
                 loadData();
             }
         }
@@ -2254,7 +2614,7 @@
             btn.innerText = "下发中...";
             btn.disabled = true;
             try {
-                await fetch(`/api/v1/devices/${deviceId}/bind-policy/${policyId}`, { method: 'POST' });
+                await authFetch(`/api/v1/devices/${deviceId}/bind-policy/${policyId}`, { method: 'POST' });
                 delete pendingSelections[`sel-${deviceId}`];
                 alert('策略已下发');
                 loadData();
@@ -2274,7 +2634,7 @@
             btn.disabled = true;
 
             try {
-                const resp = await fetch(`/api/v1/devices/${deviceId}/${endpoint}`, { method: 'POST' });
+                const resp = await authFetch(`/api/v1/devices/${deviceId}/${endpoint}`, { method: 'POST' });
                 const result = await resp.json();
 
                 if (result.ok) {
@@ -2313,7 +2673,7 @@
                 btn.innerText = "正在安装...";
                 btn.disabled = true;
                 try {
-                    const resp = await fetch(`/api/v1/devices/${deviceId}/adb-install`, { method: 'POST' });
+                    const resp = await authFetch(`/api/v1/devices/${deviceId}/adb-install`, { method: 'POST' });
                     const result = await resp.json();
                     if (result.ok) alert('安装成功！');
                     else alert('安装失败: ' + result.detail);
@@ -2342,7 +2702,7 @@
                     const ip = (device.eth_ip && device.eth_ip !== '0.0.0.0') ? device.eth_ip : device.wifi_ip;
                     if (ip) {
                         try {
-                            const resp = await fetch(`/api/v1/devices/${deviceId}/adb/shell?command=${encodeURIComponent('shell pm list packages -d')}`, { method: 'POST' });
+                            const resp = await authFetch(`/api/v1/devices/${deviceId}/adb/shell?command=${encodeURIComponent('shell pm list packages -d')}`, { method: 'POST' });
                             const result = await resp.json();
                             if (result.ok && result.output) {
                                 window._disabledApps = result.output.split('\n')
@@ -2448,7 +2808,7 @@
                 `<span style="color:var(--red);">停用系统应用可能导致电视功能异常，仅限维护人员操作。</span><br>` +
                 `<span style="color:var(--gray-600);font-size:13px;">可通过恢复出厂设置或点击「启用」按钮恢复。</span>`,
                 async function() {
-                    const resp = await fetch(`/api/v1/devices/${currentAppDeviceId}/uninstall?package_name=${encodeURIComponent(packageName)}&is_system=true`, { method: 'POST' });
+                    const resp = await authFetch(`/api/v1/devices/${currentAppDeviceId}/uninstall?package_name=${encodeURIComponent(packageName)}&is_system=true`, { method: 'POST' });
                     const result = await resp.json();
                     if (result.ok) { alert(result.message || '停用成功'); manageApps(currentAppDeviceId, ''); }
                     else alert('停用失败: ' + result.detail);
@@ -2458,14 +2818,14 @@
 
         async function uninstallApp(packageName, isSystem) {
             if (!confirm(`确定卸载 ${packageName}？`)) return;
-            const resp = await fetch(`/api/v1/devices/${currentAppDeviceId}/uninstall?package_name=${encodeURIComponent(packageName)}&is_system=false`, { method: 'POST' });
+            const resp = await authFetch(`/api/v1/devices/${currentAppDeviceId}/uninstall?package_name=${encodeURIComponent(packageName)}&is_system=false`, { method: 'POST' });
             const result = await resp.json();
             if (result.ok) { alert(result.message || '卸载成功'); manageApps(currentAppDeviceId, ''); }
             else alert('卸载失败: ' + result.detail);
         }
 
         async function launchApp(packageName) {
-            const resp = await fetch(`/api/v1/devices/${currentAppDeviceId}/launch-app?package_name=${encodeURIComponent(packageName)}`, { method: 'POST' });
+            const resp = await authFetch(`/api/v1/devices/${currentAppDeviceId}/launch-app?package_name=${encodeURIComponent(packageName)}`, { method: 'POST' });
             const result = await resp.json();
             if (result.ok) { alert('已发送启动命令'); }
             else alert('启动失败: ' + result.detail);
@@ -2473,7 +2833,7 @@
 
         async function enableApp(packageName) {
             if (!confirm(`确定启用 ${packageName}？`)) return;
-            const resp = await fetch(`/api/v1/devices/${currentAppDeviceId}/enable-app?package_name=${encodeURIComponent(packageName)}`, { method: 'POST' });
+            const resp = await authFetch(`/api/v1/devices/${currentAppDeviceId}/enable-app?package_name=${encodeURIComponent(packageName)}`, { method: 'POST' });
             const result = await resp.json();
             if (result.ok) { alert(result.message || '启用成功'); manageApps(currentAppDeviceId, ''); }
             else alert('启用失败: ' + result.detail);
@@ -2485,11 +2845,11 @@
             const formData = new FormData();
             formData.append('file', fileInput.files[0]);
             try {
-                const resp = await fetch('/api/v1/upload-apk', { method: 'POST', body: formData });
+                const resp = await authFetch('/api/v1/upload-apk', { method: 'POST', body: formData });
                 const result = await resp.json();
                 if (result.ok) {
                     alert('上传成功，正在远程安装...');
-                    const installResp = await fetch(`/api/v1/devices/${currentAppDeviceId}/install-uploaded?filename=${encodeURIComponent(result.filename)}`, { method: 'POST' });
+                    const installResp = await authFetch(`/api/v1/devices/${currentAppDeviceId}/install-uploaded?filename=${encodeURIComponent(result.filename)}`, { method: 'POST' });
                     const installResult = await installResp.json();
                     if (installResult.ok) { alert('安装成功！'); closeAppModal(); }
                     else alert('安装失败: ' + installResult.detail);
@@ -2504,7 +2864,7 @@
             btn.innerText = '升级中...';
             btn.disabled = true;
             try {
-                const resp = await fetch(`/api/v1/devices/${currentAppDeviceId}/silent-upgrade`, { method: 'POST' });
+                const resp = await authFetch(`/api/v1/devices/${currentAppDeviceId}/silent-upgrade`, { method: 'POST' });
                 const result = await resp.json();
                 if (result.ok) {
                     alert('升级成功！' + (result.message || ''));
@@ -2523,7 +2883,7 @@
 
         async function showLogs() {
             document.getElementById('logModal').style.display = 'block';
-            const logs = await (await fetch('/api/v1/logs')).json();
+            const logs = await (await authFetch('/api/v1/logs')).json();
             const logList = document.getElementById('logList');
             const actionMap = { 'bind_policy': '策略绑定', 'screenshot': '远程控制', 'adb_install': '安装APK', 'uninstall': '卸载应用', 'install_uploaded': '上传安装', 'delete_policy': '删除策略', 'delete_device': '移除设备', 'update_room': '修改会议室' };
             logList.innerHTML = logs.length === 0 ? '<div class="empty-state">暂无日志记录</div>' : logs.map(log => `
@@ -2539,13 +2899,13 @@
         }
 
         function closeLogModal() { document.getElementById('logModal').style.display = 'none'; }
-        async function clearLogs() { if (confirm('清空所有记录？')) { await fetch('/api/v1/logs', { method: 'DELETE' }); showLogs(); } }
+        async function clearLogs() { if (confirm('清空所有记录？')) { await authFetch('/api/v1/logs', { method: 'DELETE' }); showLogs(); } }
 
         // ==================== 远程连接相关函数 ====================
 
         async function checkScrcpyInstallation() {
             try {
-                const resp = await fetch('/api/v1/scrcpy/check');
+                const resp = await authFetch('/api/v1/scrcpy/check');
                 const result = await resp.json();
 
                 const statusDiv = document.getElementById('scrcpyStatus');
@@ -2594,7 +2954,7 @@
             statusDiv.innerHTML = '<span style="color:#9a5c00;">正在自动下载并安装远程功能组件，请耐心等待（可能需要1-2分钟）...</span>';
 
             try {
-                const resp = await fetch('/api/v1/scrcpy/auto-install', { method: 'POST' });
+                const resp = await authFetch('/api/v1/scrcpy/auto-install', { method: 'POST' });
                 const result = await resp.json();
 
                 if (result.ok) {
@@ -2627,7 +2987,7 @@
 
             try {
                 // 首先连接ADB
-                const adbResp = await fetch(`/api/v1/devices/${deviceId}/adb/connect`, { method: 'POST' });
+                const adbResp = await authFetch(`/api/v1/devices/${deviceId}/adb/connect`, { method: 'POST' });
                 const adbResult = await adbResp.json();
 
                 if (!adbResult.ok) {
@@ -2638,7 +2998,7 @@
                 }
 
                 // 启动远程连接会话
-                const resp = await fetch(`/api/v1/devices/${deviceId}/scrcpy/start`, { method: 'POST' });
+                const resp = await authFetch(`/api/v1/devices/${deviceId}/scrcpy/start`, { method: 'POST' });
                 const result = await resp.json();
 
                 if (result.ok) {
@@ -2669,7 +3029,7 @@
             stopBtn.innerHTML = '停止中...';
 
             try {
-                const resp = await fetch(`/api/v1/devices/${deviceId}/scrcpy/stop`, { method: 'POST' });
+                const resp = await authFetch(`/api/v1/devices/${deviceId}/scrcpy/stop`, { method: 'POST' });
                 const result = await resp.json();
 
                 if (result.ok) {
@@ -2700,7 +3060,7 @@
             // 开始新的轮询
             scrcpyCheckInterval = setInterval(async () => {
                 try {
-                    const resp = await fetch(`/api/v1/devices/${deviceId}/scrcpy/status`);
+                    const resp = await authFetch(`/api/v1/devices/${deviceId}/scrcpy/status`);
                     const result = await resp.json();
 
                     const statusDiv = document.getElementById('scrcpyStatus');
@@ -2733,7 +3093,7 @@
 
         async function getScrcpyCommand(deviceId) {
             try {
-                const resp = await fetch(`/api/v1/devices/${deviceId}/scrcpy/command`);
+                const resp = await authFetch(`/api/v1/devices/${deviceId}/scrcpy/command`);
                 const result = await resp.json();
 
                 if (result.ok) {
@@ -2794,7 +3154,7 @@
             if (_connCheckRunning) return; // 防止并发
             _connCheckRunning = true;
             try {
-                const resp = await fetch('/api/v1/devices/connectivity-check');
+                const resp = await authFetch('/api/v1/devices/connectivity-check');
                 if (!resp.ok) {
                     console.error('Connectivity check HTTP error:', resp.status);
                     return;
@@ -2813,6 +3173,94 @@
             }
         }
         setInterval(checkConnectivity, 30000);
+
+        // 页面加载时检查认证
+        (async function() {
+            if (await checkAuth()) {
+                showMainContent();
+                loadData();
+            }
+        })();
+
+        // 点击外部关闭用户下拉菜单
+        document.addEventListener('click', function(e) {
+            const dd = document.getElementById('userDropdown');
+            if (dd && dd.classList.contains('show') && !e.target.closest('#userDropdown') && !e.target.closest('[onclick*="userDropdown"]')) {
+                dd.classList.remove('show');
+            }
+        });
     </script>
+
+    <!-- ========== 修改密码弹窗 ========== -->
+    <div id="changePwdDialog" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:1000; align-items:center; justify-content:center;">
+        <div style="background:#fff; padding:24px; border-radius:10px; width:360px;">
+            <h3 style="margin-bottom:16px;">修改密码</h3>
+            <div id="changePwdError" style="display:none; background:var(--red-light); color:var(--red); padding:6px 10px; border-radius:4px; margin-bottom:8px; font-size:13px;"></div>
+            <input type="password" id="changePwdOld" placeholder="原密码" style="width:100%; padding:8px 10px; border:1px solid var(--gray-300); border-radius:4px; margin-bottom:8px;">
+            <input type="password" id="changePwdNew" placeholder="新密码" style="width:100%; padding:8px 10px; border:1px solid var(--gray-300); border-radius:4px; margin-bottom:12px;">
+            <div style="display:flex; gap:8px; justify-content:flex-end;">
+                <button onclick="document.getElementById('changePwdDialog').style.display='none'" style="padding:6px 16px; border:1px solid var(--gray-300); border-radius:4px; cursor:pointer;">取消</button>
+                <button onclick="doChangePassword()" style="padding:6px 16px; background:var(--blue); color:#fff; border:none; border-radius:4px; cursor:pointer;">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== 用户管理弹窗 ========== -->
+    <div id="userMgmtDialog" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:1000; align-items:center; justify-content:center;">
+        <div style="background:#fff; padding:24px; border-radius:10px; width:700px; max-height:80vh; overflow:auto;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                <h3>账号管理</h3>
+                <button onclick="showAddUserDialog()" style="padding:6px 16px; background:var(--blue); color:#fff; border:none; border-radius:4px; cursor:pointer;">添加用户</button>
+            </div>
+            <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                <thead><tr style="background:var(--gray-100);"><th style="padding:8px; text-align:left;">用户名</th><th style="padding:8px; text-align:left;">权限</th><th style="padding:8px; text-align:left;">状态</th><th style="padding:8px; text-align:left;">操作</th></tr></thead>
+                <tbody id="userTableBody"></tbody>
+            </table>
+            <div style="text-align:right; margin-top:12px;">
+                <button onclick="document.getElementById('userMgmtDialog').style.display='none'" style="padding:6px 16px; border:1px solid var(--gray-300); border-radius:4px; cursor:pointer;">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== 用户编辑弹窗 ========== -->
+    <div id="userDialog" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:1001; align-items:center; justify-content:center;">
+        <div style="background:#fff; padding:24px; border-radius:10px; width:460px; max-height:80vh; overflow:auto;">
+            <h3 id="userDialogTitle" style="margin-bottom:16px;">添加用户</h3>
+            <div id="userDialogError" style="display:none; background:var(--red-light); color:var(--red); padding:6px 10px; border-radius:4px; margin-bottom:8px; font-size:13px;"></div>
+            <input type="hidden" id="userDialogId">
+            <label style="display:block; margin-bottom:4px; font-size:13px; color:var(--gray-600);">用户名</label>
+            <input type="text" id="userDialogUsername" style="width:100%; padding:8px 10px; border:1px solid var(--gray-300); border-radius:4px; margin-bottom:8px;">
+            <label style="display:block; margin-bottom:4px; font-size:13px; color:var(--gray-600);">密码 <span id="userDialogPwdHint" style="color:var(--gray-400);">(编辑时留空则不修改)</span></label>
+            <input type="password" id="userDialogPassword" style="width:100%; padding:8px 10px; border:1px solid var(--gray-300); border-radius:4px; margin-bottom:8px;">
+            <label style="display:block; margin-bottom:4px; font-size:13px; color:var(--gray-600);"><input type="checkbox" id="userDialogActive" checked> 启用</label>
+            <div style="margin-bottom:8px;">
+                <label style="display:block; margin-bottom:4px; font-size:13px; color:var(--gray-600);">快捷角色</label>
+                <div style="display:flex; gap:6px; margin-bottom:8px;">
+                    <button type="button" onclick="applyRoleTemplate('readonly')" style="padding:4px 10px; border:1px solid var(--gray-300); border-radius:4px; cursor:pointer; font-size:12px;">只读</button>
+                    <button type="button" onclick="applyRoleTemplate('operator')" style="padding:4px 10px; border:1px solid var(--gray-300); border-radius:4px; cursor:pointer; font-size:12px;">运维</button>
+                    <button type="button" onclick="applyRoleTemplate('admin')" style="padding:4px 10px; border:1px solid var(--gray-300); border-radius:4px; cursor:pointer; font-size:12px;">管理员</button>
+                </div>
+                <label style="display:block; margin-bottom:4px; font-size:13px; color:var(--gray-600);">权限选择</label>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:13px;">
+                    <label><input type="checkbox" class="perm-checkbox" value="device_view"> 设备查看</label>
+                    <label><input type="checkbox" class="perm-checkbox" value="policy_view"> 策略查看</label>
+                    <label><input type="checkbox" class="perm-checkbox" value="log_view"> 日志查看</label>
+                    <label><input type="checkbox" class="perm-checkbox" value="device_op"> 设备操作</label>
+                    <label><input type="checkbox" class="perm-checkbox" value="remote_ctrl"> 远程控制</label>
+                    <label><input type="checkbox" class="perm-checkbox" value="policy_mgmt"> 策略管理</label>
+                    <label><input type="checkbox" class="perm-checkbox" value="app_mgmt"> 应用管理</label>
+                    <label><input type="checkbox" class="perm-checkbox" value="adb_console"> ADB控制台</label>
+                    <label><input type="checkbox" class="perm-checkbox" value="device_mgmt"> 设备管理</label>
+                    <label><input type="checkbox" class="perm-checkbox" value="user_mgmt"> 用户管理</label>
+                </div>
+            </div>
+            <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px;">
+                <button onclick="document.getElementById('userDialog').style.display='none'" style="padding:6px 16px; border:1px solid var(--gray-300); border-radius:4px; cursor:pointer;">取消</button>
+                <button onclick="saveUser()" style="padding:6px 16px; background:var(--blue); color:#fff; border:none; border-radius:4px; cursor:pointer;">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== ADB Shell风险提示弹窗 ========== -->
 </body>
 </html>
