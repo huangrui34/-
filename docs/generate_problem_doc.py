@@ -1172,6 +1172,46 @@ PROBLEMS = [
             "按钮disabled+文字变更是最简单有效的反馈方式。"
         ),
     },
+    {
+        "id": 28,
+        "title": "HDMI策略按HOME/BACK后不立即恢复",
+        "severity": "高",
+        "symptom": (
+            "用户在HDMI策略运行时误按HOME或BACK键回到主页，期望APP立即恢复到HDMI策略，"
+            "但实际上需要等待3-5秒甚至更久才能恢复。\n\n"
+            "更严重的是：连续按多次HOME键，恢复越来越慢，用户体验极差。\n"
+            "安卓6和安卓9电视都有此问题。"
+        ),
+        "cause": (
+            "策略执行后设置了30秒冷却期（HDMI_SWITCH_COOLDOWN）和5秒防抖（EXECUTION_COOLDOWN）。\n\n"
+            "用户按HOME/BACK后，MainActivity.onResume被调用，触发保活检查执行策略恢复。\n"
+            "但由于冷却期检查，策略恢复被阻止：\n\n"
+            "• MainActivity.onResume中的策略执行被冷却期跳过\n"
+            "• forceExecutePolicy中的冷却期检查阻止恢复\n"
+            "• 保活检查中的冷却期阻止立即恢复\n\n"
+            "只能等待KeepAliveForegroundService的5秒检查周期来恢复，导致明显延迟。"
+        ),
+        "solution": (
+            "HDMI模式下，当检测到hdmi_foreground=false（HdmiActivity不在前台）时，\n"
+            "绕过所有冷却期限制，立即恢复策略：\n\n"
+            "1. MainActivity.onResume：\n"
+            "   if (policy.mode == \"hdmi\" && !hdmiFg) { 立即恢复，绕过5秒防抖和30秒冷却期 }\n\n"
+            "2. forceExecutePolicy：\n"
+            "   hdmiNeedsRecovery = policy.mode == \"hdmi\" && !hdmiFg\n"
+            "   if (hdmiNeedsRecovery) { 绕过防抖和冷却期 }\n\n"
+            "3. 保活检查：\n"
+            "   if (!hdmiFg && !policyStore.isPolicyPaused()) { 直接恢复，不检查冷却期 }\n\n"
+            "关键思路：冷却期的目的是防止策略切换时重复启动HdmiActivity导致闪烁。\n"
+            "但用户按HOME/BACK离开HdmiActivity时，必须立即拉回，不应受冷却期限制。"
+        ),
+        "lesson": (
+            "冷却期机制需要区分场景：\n"
+            "• 策略切换中（hdmi_foreground=true）：需要冷却期防止重复启动\n"
+            "• 用户误离开（hdmi_foreground=false）：需要立即恢复，绕过冷却期\n\n"
+            "hdmi_foreground SharedPreferences标志是关键的状态判断依据，"
+            "由HdmiActivity.onResume/onPause设置，其他组件可以可靠地判断HdmiActivity是否在前台。"
+        ),
+    },
 ]
 
 # ========== 生成文档 ==========

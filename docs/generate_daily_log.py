@@ -86,6 +86,38 @@ def set_table_style(table):
 
 WORK_LOG = [
     {
+        "date": "2026-05-06",
+        "summary": "HDMI策略按HOME/BACK后立即恢复(绕过冷却期)+DPAD按键泄漏防护",
+        "tasks": [
+            {
+                "type": "Bug修复",
+                "title": "HDMI策略按HOME/BACK后不立即恢复",
+                "description": "用户误按HOME/BACK后HDMI策略需要3-5秒才能恢复，冷却期阻止了立即恢复",
+                "details": [
+                    "MainActivity.onResume: HDMI模式下hdmi_foreground=false时立即恢复，绕过5秒防抖和30秒冷却期",
+                    "forceExecutePolicy: HDMI恢复场景绕过防抖和冷却期检查",
+                    "保活检查: hdmi_foreground=false时直接恢复，不受冷却期限制",
+                    "KeepAliveForegroundService: HDMI模式检查hdmi_foreground并重新执行策略",
+                    "关键思路: 冷却期防止策略切换时重复启动，但用户误离开时必须立即恢复",
+                ],
+                "status": "已完成",
+                "files": ["MainActivity.kt", "KeepAliveForegroundService.kt"]
+            },
+            {
+                "type": "Bug修复",
+                "title": "DPAD按键泄漏到其他Activity",
+                "description": "HdmiActivity的scheduleConfirmDialog发送的DPAD按键可能泄漏到MainActivity点击设置按钮",
+                "details": [
+                    "scheduleConfirmDialog添加hasFocus检查",
+                    "发送DPAD_CENTER/DPAD_RIGHT前检查hasFocus，失去焦点时跳过",
+                    "防止按键在Activity切换时泄漏到其他Activity",
+                ],
+                "status": "已完成",
+                "files": ["HdmiActivity.kt"]
+            },
+        ]
+    },
+    {
         "date": "2026-05-03",
         "summary": "HDMI暂停按键误触修复、策略切换闪烁修复、HDMI拔插黑屏修复、离线设备显示优化、管理后台按钮loading状态",
         "tasks": [
