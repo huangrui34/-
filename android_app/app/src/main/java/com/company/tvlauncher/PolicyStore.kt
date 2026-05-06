@@ -155,6 +155,12 @@ class PolicyStore(private val context: Context) {
     ): Boolean {
         if (mode.isNullOrBlank()) return false
 
+        // HDMI自动切换激活时，不覆盖策略（HDMI断开后会自动恢复）
+        if (isHdmiAutoSwitched()) {
+            android.util.Log.d("PolicyStore", "HDMI自动切换中，忽略远程策略更新")
+            return false
+        }
+
         // 检查是否有变化
         val currentPolicy = getPolicy()
         val modeChanged = mode != currentPolicy.mode

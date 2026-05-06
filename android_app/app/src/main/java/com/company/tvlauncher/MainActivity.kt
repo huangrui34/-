@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.media.tv.TvInputManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -40,6 +41,53 @@ class MainActivity : AppCompatActivity() {
     private var hdmiPauseTransitionTime = 0L
     private val HDMI_PAUSE_KEY_SUPPRESS_MS = 5000L
 
+    // TvInputManager检测HDMI信号接入（比HDMI_PLUGGED广播更可靠）
+    private var tvInputManager: TvInputManager? = null
+    private val mainTvInputCallback = object : TvInputManager.TvInputCallback() {
+        override fun onInputStateChanged(inputId: String, state: Int) {
+            // state: 0=信号可用, 1=不可用, 2=已连接但无信号
+            android.util.Log.d("MainActivity", "TV输入状态变更: $inputId, state=$state")
+            if (!isHdmiInput(inputId)) return
+            if (state == 0) {
+                val port = extractHdmiPort(inputId)
+                android.util.Log.d("MainActivity", "HDMI${port}信号接入($inputId)，触发自动切换")
+                mainHandler.post { handleHdmiSignalConnected(port) }
+            } else if (!isAnyHdmiSignalAvailable()) {
+                // HDMI信号丢失且没有其他HDMI口有信号，恢复原策略
+                android.util.Log.d("MainActivity", "HDMI信号丢失且无其他HDMI信号，恢复原策略")
+                mainHandler.post { handleHdmiStatusChanged(false) }
+            }
+        }
+
+        override fun onInputRemoved(inputId: String) {
+            android.util.Log.d("MainActivity", "TV输入移除: $inputId")
+            if (isHdmiInput(inputId) && !isAnyHdmiSignalAvailable()) {
+                android.util.Log.d("MainActivity", "HDMI信号全部断开，恢复原策略")
+                mainHandler.post { handleHdmiStatusChanged(false) }
+            }
+        }
+    }
+
+    private fun isHdmiInput(inputId: String): Boolean {
+        return inputId.contains("Hdmi", ignoreCase = true)
+    }
+
+    private fun extractHdmiPort(inputId: String): Int {
+        val regex = Regex("Hdmi(\\d+)", RegexOption.IGNORE_CASE)
+        val match = regex.find(inputId)
+        return match?.groupValues?.get(1)?.toIntOrNull() ?: 1
+    }
+
+    private fun isAnyHdmiSignalAvailable(): Boolean {
+        try {
+            val tvInputs = tvInputManager?.tvInputList ?: return false
+            for (input in tvInputs) {
+                if (isHdmiInput(input.id) && tvInputManager?.getInputState(input.id) == 0) return true
+            }
+        } catch (_: Exception) {}
+        return false
+    }
+
     // 保活检查的Handler和Runnable
     private var keepAliveHandler: Handler? = null
     private var keepAliveRunnable: Runnable? = null
@@ -62,10 +110,15 @@ class MainActivity : AppCompatActivity() {
                         android.util.Log.d("MainActivity", "===== 策略已暂停，切回主页 =====")
                         bringLauncherToFront()
                     } else {
-                        android.util.Log.d("MainActivity", "===== 策略未暂停，重新执行策略 =====")
-                        // 使用force=true绕过冷却期，但只执行一次
-                        // 如果HdmiActivity正在运行且端口没变，forceExecutePolicy会跳过
-                        forceExecutePolicy(policyStore, force = true, userTriggered = true)
+                        // HDMI自动切换激活时，不执行服务器下发的策略
+                        if (policyStore.isHdmiAutoSwitched()) {
+                            android.util.Log.d("MainActivity", "HDMI自动切换中，忽略策略更新广播")
+                        } else {
+                            android.util.Log.d("MainActivity", "===== 策略未暂停，重新执行策略 =====")
+                            // 使用force=true绕过冷却期，但只执行一次
+                            // 如果HdmiActivity正在运行且端口没变，forceExecutePolicy会跳过
+                            forceExecutePolicy(policyStore, force = true, userTriggered = true)
+                        }
                     }
                 }
             }
@@ -109,6 +162,15 @@ class MainActivity : AppCompatActivity() {
         // 注册HDMI状态变化广播接收器
         val hdmiFilter = IntentFilter(HdmiReceiver.ACTION_HDMI_STATUS_CHANGED)
         registerReceiver(hdmiStatusReceiver, hdmiFilter)
+
+        // 注册TvInputCallback检测HDMI信号（比广播更可靠，能识别具体端口号）
+        try {
+            tvInputManager = getSystemService(Context.TV_INPUT_SERVICE) as? TvInputManager
+            tvInputManager?.registerCallback(mainTvInputCallback, mainHandler)
+            android.util.Log.d("MainActivity", "TvInputCallback已注册")
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "TvInputManager不可用: ${e.message}")
+        }
 
         // 检查HDMI初始状态（APP启动时HDMI可能已接入）
         checkInitialHdmiState()
@@ -446,7 +508,9 @@ class MainActivity : AppCompatActivity() {
             val hdmiFg = getSharedPreferences("tv_policy", Context.MODE_PRIVATE)
                 .getBoolean("hdmi_foreground", true)
             // APP模式：Launcher在前台 = 目标APP不在前台，需要立即恢复
+            // 但HDMI自动切换中不恢复APP，等HDMI断开后自动恢复
             val appNeedsRecovery = policy.mode == "app" && isLauncherInForegroundCheck()
+                && !policyStore.isHdmiAutoSwitched()
 
             if (policy.mode == "hdmi" && !hdmiFg) {
                 // HDMI模式 + HdmiActivity不在前台：立即恢复，不受任何冷却期限制
@@ -612,6 +676,50 @@ class MainActivity : AppCompatActivity() {
     private val HDMI_SWITCH_COOLDOWN = 30000L // 30秒内不重复检查HDMI保活
 
     /**
+     * HDMI信号接入处理
+     * 任意策略下 + 任意HDMI口信号接入 → 立刻跳转到该HDMI口
+     * 后接入的覆盖前面的
+     */
+    private fun handleHdmiSignalConnected(port: Int) {
+        val policyStore = PolicyStore(this)
+
+        if (!policyStore.isHdmiAutoSwitchEnabled()) {
+            android.util.Log.d("MainActivity", "HDMI自动切换功能已关闭，忽略")
+            return
+        }
+
+        if (policyStore.isPolicyPaused()) {
+            android.util.Log.d("MainActivity", "策略已暂停，不触发HDMI自动切换")
+            return
+        }
+
+        val currentPolicy = policyStore.getPolicy()
+
+        // 如果当前已经在显示同一个HDMI口且不是自动切换的，不需要切换
+        if (currentPolicy.mode == "hdmi" && currentPolicy.targetHdmiPort == port && !policyStore.isHdmiAutoSwitched()) {
+            android.util.Log.d("MainActivity", "已在HDMI${port}，无需切换")
+            return
+        }
+
+        // 如果还没保存过原始策略，保存当前策略（支持HDMI→HDMI的链式覆盖）
+        if (!policyStore.isHdmiAutoSwitched()) {
+            policyStore.savePreHdmiPolicy(currentPolicy)
+        }
+        // 如果已经在HDMI自动切换中，不覆盖pre_hdmi_policy（保留最初的原始策略）
+
+        policyStore.setHdmiAutoSwitched(true)
+
+        // 切换到接入的HDMI端口
+        val hdmiPolicy = LaunchPolicy(mode = "hdmi", targetHdmiPort = port)
+        policyStore.savePolicy(hdmiPolicy)
+
+        android.util.Log.d("MainActivity", "HDMI${port}信号接入，自动切换。原策略: ${currentPolicy.mode}/${currentPolicy.targetAppPackage}/HDMI${currentPolicy.targetHdmiPort}")
+
+        forceExecutePolicy(policyStore, force = true, userTriggered = true)
+        refreshStatus(policyStore)
+    }
+
+    /**
      * 处理HDMI状态变化
      * HDMI接入：保存当前策略，自动切换到HDMI1
      * HDMI断开：恢复之前的策略
@@ -626,57 +734,31 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (connected) {
-            // HDMI接入
-            val currentPolicy = policyStore.getPolicy()
+            // 连接事件由handleHdmiSignalConnected处理（TvInputCallback提供端口号）
+            // 这里只处理HDMI_PLUGGED广播的连接（无端口号，默认HDMI1）
+            handleHdmiSignalConnected(1)
+            return
+        }
 
-            // 如果当前已经是HDMI模式，不需要切换
-            if (currentPolicy.mode == "hdmi") {
-                android.util.Log.d("MainActivity", "当前已是HDMI模式，无需自动切换")
-                return
-            }
+        // HDMI断开：恢复之前的策略
+        if (!policyStore.isHdmiAutoSwitched()) {
+            android.util.Log.d("MainActivity", "HDMI断开，但不是自动切换的，不恢复策略")
+            return
+        }
 
-            // 如果策略已暂停，不触发自动切换
-            if (policyStore.isPolicyPaused()) {
-                android.util.Log.d("MainActivity", "策略已暂停，不触发HDMI自动切换")
-                return
-            }
+        val prePolicy = policyStore.getPreHdmiPolicy()
+        if (prePolicy != null) {
+            policyStore.savePolicy(prePolicy)
+            policyStore.setHdmiAutoSwitched(false)
+            policyStore.clearPreHdmiPolicy()
 
-            // 保存当前策略，标记为HDMI自动切换
-            policyStore.savePreHdmiPolicy(currentPolicy)
-            policyStore.setHdmiAutoSwitched(true)
+            android.util.Log.d("MainActivity", "HDMI断开，恢复原策略: ${prePolicy.mode}/${prePolicy.targetAppPackage}")
 
-            // 切换到HDMI1策略
-            val hdmiPolicy = LaunchPolicy(mode = "hdmi", targetHdmiPort = 1)
-            policyStore.savePolicy(hdmiPolicy)
-
-            android.util.Log.d("MainActivity", "HDMI接入，自动切换到HDMI1。原策略: ${currentPolicy.mode}/${currentPolicy.targetAppPackage}")
-
-            // 执行HDMI1策略
             forceExecutePolicy(policyStore, force = true, userTriggered = true)
         } else {
-            // HDMI断开
-            if (!policyStore.isHdmiAutoSwitched()) {
-                android.util.Log.d("MainActivity", "HDMI断开，但不是自动切换的，不恢复策略")
-                return
-            }
-
-            // 恢复之前的策略
-            val prePolicy = policyStore.getPreHdmiPolicy()
-            if (prePolicy != null) {
-                policyStore.savePolicy(prePolicy)
-                policyStore.setHdmiAutoSwitched(false)
-                policyStore.clearPreHdmiPolicy()
-
-                android.util.Log.d("MainActivity", "HDMI断开，恢复原策略: ${prePolicy.mode}/${prePolicy.targetAppPackage}")
-
-                // 执行恢复的策略
-                forceExecutePolicy(policyStore, force = true, userTriggered = true)
-            } else {
-                // 没有之前的策略记录，只清除标记
-                policyStore.setHdmiAutoSwitched(false)
-                policyStore.clearPreHdmiPolicy()
-                android.util.Log.d("MainActivity", "HDMI断开，无之前的策略记录")
-            }
+            policyStore.setHdmiAutoSwitched(false)
+            policyStore.clearPreHdmiPolicy()
+            android.util.Log.d("MainActivity", "HDMI断开，无之前的策略记录")
         }
 
         refreshStatus(policyStore)
@@ -684,73 +766,97 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * 检查HDMI初始状态
-     * APP启动时HDMI可能已经接入，通过Sticky Intent获取当前状态
+     * 优先用TvInputManager检测（能识别具体HDMI端口），HDMI_PLUGGED广播和sysfs作为备用
      */
     private fun checkInitialHdmiState() {
-        try {
-            val stickyIntent = registerReceiver(null, IntentFilter("android.intent.action.HDMI_PLUGGED"))
-            if (stickyIntent != null) {
-                val connected = stickyIntent.getBooleanExtra("state", false)
-                android.util.Log.d("MainActivity", "HDMI初始状态: connected=$connected")
+        val policyStore = PolicyStore(this)
 
-                if (connected) {
-                    val policyStore = PolicyStore(this)
-                    // 如果当前是APP模式且HDMI已接入，自动切换到HDMI1
-                    val currentPolicy = policyStore.getPolicy()
-                    if (currentPolicy.mode == "app" &&
-                        policyStore.isHdmiAutoSwitchEnabled() &&
-                        !policyStore.isPolicyPaused()) {
+        if (!policyStore.isHdmiAutoSwitchEnabled() || policyStore.isPolicyPaused()) {
+            android.util.Log.d("MainActivity", "无需检查HDMI初始状态(已关闭或已暂停)")
+            return
+        }
 
-                        policyStore.savePreHdmiPolicy(currentPolicy)
-                        policyStore.setHdmiAutoSwitched(true)
+        val currentPolicy = policyStore.getPolicy()
 
-                        val hdmiPolicy = LaunchPolicy(mode = "hdmi", targetHdmiPort = 1)
-                        policyStore.savePolicy(hdmiPolicy)
-
-                        android.util.Log.d("MainActivity", "启动时HDMI已接入，自动切换到HDMI1")
-
-                        // 延迟执行，等待Activity完全启动
-                        mainHandler.postDelayed({
-                            forceExecutePolicy(PolicyStore(this), force = true, userTriggered = true)
-                            refreshStatus(PolicyStore(this))
-                        }, 3000)
-                    }
-                }
+        // 验证上次session残留的hdmi_auto_switched标记
+        if (policyStore.isHdmiAutoSwitched()) {
+            if (isAnyHdmiSignalAvailable()) {
+                android.util.Log.d("MainActivity", "HDMI自动切换状态恢复: HDMI信号仍在线")
             } else {
-                // 尝试读取/sys文件作为备用
-                try {
-                    val stateFile = java.io.File("/sys/class/switch/hdmirx_hpd/state")
-                    if (stateFile.exists()) {
-                        val state = stateFile.readText().trim()
-                        android.util.Log.d("MainActivity", "HDMI初始状态(sysfs): $state")
-                        if (state == "1") {
-                            val policyStore = PolicyStore(this)
-                            val currentPolicy = policyStore.getPolicy()
-                            if (currentPolicy.mode == "app" &&
-                                policyStore.isHdmiAutoSwitchEnabled() &&
-                                !policyStore.isPolicyPaused()) {
+                // HDMI信号已不在，恢复原策略并清除标记
+                val prePolicy = policyStore.getPreHdmiPolicy()
+                if (prePolicy != null) {
+                    policyStore.savePolicy(prePolicy)
+                    android.util.Log.d("MainActivity", "重启后HDMI已断开，恢复原策略: ${prePolicy.mode}")
+                }
+                policyStore.setHdmiAutoSwitched(false)
+                policyStore.clearPreHdmiPolicy()
+            }
+        }
 
-                                policyStore.savePreHdmiPolicy(currentPolicy)
-                                policyStore.setHdmiAutoSwitched(true)
-
-                                val hdmiPolicy = LaunchPolicy(mode = "hdmi", targetHdmiPort = 1)
-                                policyStore.savePolicy(hdmiPolicy)
-
-                                android.util.Log.d("MainActivity", "启动时HDMI已接入(sysfs)，自动切换到HDMI1")
-
-                                mainHandler.postDelayed({
-                                    forceExecutePolicy(PolicyStore(this), force = true, userTriggered = true)
-                                    refreshStatus(PolicyStore(this))
-                                }, 3000)
-                            }
-                        }
+        // 方法1: TvInputManager检测HDMI信号（最可靠，能识别具体端口）
+        var hdmiPort = 0
+        try {
+            val tvInputs = tvInputManager?.tvInputList
+            if (tvInputs != null) {
+                for (input in tvInputs) {
+                    if (isHdmiInput(input.id) && tvInputManager?.getInputState(input.id) == 0) {
+                        hdmiPort = extractHdmiPort(input.id)
+                        android.util.Log.d("MainActivity", "HDMI初始信号: HDMI${hdmiPort}(${input.id})")
+                        break
                     }
-                } catch (e: Exception) {
-                    android.util.Log.d("MainActivity", "读取HDMI sysfs状态失败: ${e.message}")
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.e("MainActivity", "检查HDMI初始状态失败: ${e.message}")
+            android.util.Log.w("MainActivity", "TvInputManager检测失败: ${e.message}")
+        }
+
+        // 方法2: HDMI_PLUGGED sticky intent（备用）
+        if (hdmiPort == 0) {
+            try {
+                val stickyIntent = registerReceiver(null, IntentFilter("android.intent.action.HDMI_PLUGGED"))
+                if (stickyIntent != null) {
+                    val connected = stickyIntent.getBooleanExtra("state", false)
+                    android.util.Log.d("MainActivity", "HDMI初始状态(广播): connected=$connected")
+                    if (connected) hdmiPort = 1
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("MainActivity", "HDMI_PLUGGED检测失败: ${e.message}")
+            }
+        }
+
+        // 方法3: sysfs（备用）
+        if (hdmiPort == 0) {
+            try {
+                val stateFile = java.io.File("/sys/class/switch/hdmirx_hpd/state")
+                if (stateFile.exists()) {
+                    val state = stateFile.readText().trim()
+                    android.util.Log.d("MainActivity", "HDMI初始状态(sysfs): $state")
+                    if (state == "1") hdmiPort = 1
+                }
+            } catch (e: Exception) {
+                android.util.Log.d("MainActivity", "读取HDMI sysfs状态失败: ${e.message}")
+            }
+        }
+
+        // 重新读取currentPolicy（可能被上面的hdmi_auto_switched清理修改了）
+        val updatedPolicy = policyStore.getPolicy()
+
+        if (hdmiPort > 0 && updatedPolicy.mode != "hdmi") {
+            policyStore.savePreHdmiPolicy(updatedPolicy)
+            policyStore.setHdmiAutoSwitched(true)
+
+            val hdmiPolicy = LaunchPolicy(mode = "hdmi", targetHdmiPort = hdmiPort)
+            policyStore.savePolicy(hdmiPolicy)
+
+            android.util.Log.d("MainActivity", "启动时HDMI${hdmiPort}已接入，自动切换")
+
+            mainHandler.postDelayed({
+                forceExecutePolicy(PolicyStore(this), force = true, userTriggered = true)
+                refreshStatus(PolicyStore(this))
+            }, 3000)
+        } else {
+            android.util.Log.d("MainActivity", "启动时无HDMI信号或已是HDMI模式")
         }
     }
 
@@ -794,9 +900,10 @@ class MainActivity : AppCompatActivity() {
 
                     when (policy.mode) {
                         "app" -> {
-                            // APP模式：检查目标APP是否在前台运行
-                            // 刚启动过的APP在冷却期内，跳过检查防止重复forceStop
-                            if (LauncherExecutor.isInLaunchCooldown()) {
+                            // HDMI自动切换中不执行APP保活，等HDMI断开后自动恢复
+                            if (policyStore.isHdmiAutoSwitched()) {
+                                android.util.Log.d("MainActivity", "HDMI自动切换中，跳过APP保活检查")
+                            } else if (LauncherExecutor.isInLaunchCooldown()) {
                                 android.util.Log.d("MainActivity", "APP启动冷却期中，跳过保活检查")
                             } else {
                                 val isLauncherFg = isLauncherInForegroundCheck()
@@ -874,6 +981,11 @@ class MainActivity : AppCompatActivity() {
         timeUpdateHandler?.removeCallbacks(timeUpdateRunnable!!)
         timeUpdateHandler = null
         timeUpdateRunnable = null
+
+        // 注销TvInputCallback
+        try {
+            tvInputManager?.unregisterCallback(mainTvInputCallback)
+        } catch (_: Exception) {}
 
         // 注销广播接收器
         try {
