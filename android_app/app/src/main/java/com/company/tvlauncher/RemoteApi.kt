@@ -144,8 +144,22 @@ class RemoteApi(
             .build()
         try {
             client.newCall(req).execute().use { resp ->
+                if (resp.code == 401) {
+                    // Token无效（可能被轮换），清除本地token触发重新注册
+                    android.util.Log.w("RemoteApi", "心跳401，Token已失效，清除本地token")
+                    policyStore.clearDeviceToken()
+                    return false
+                }
                 if (!resp.isSuccessful) return false
                 val json = JSONObject(resp.body?.string() ?: return false)
+
+                // 处理Token轮换：如果后台下发了新token，替换本地存储的旧token
+                val newToken = json.optString("new_token", "")
+                if (newToken.isNotBlank()) {
+                    policyStore.setDeviceToken(newToken)
+                    android.util.Log.d("RemoteApi", "收到新Token，已替换")
+                }
+
                 val policy = json.optJSONObject("policy") ?: return true
                 val mode = policy.optString("mode", "")
                 val app = policy.optString("target_app_package", "")

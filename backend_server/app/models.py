@@ -69,6 +69,7 @@ class Device(Base):
     storage_usage: Mapped[str | None] = mapped_column(String(64), nullable=True) # New field
     online: Mapped[bool] = mapped_column(Boolean, default=False)
     token: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    pending_new_token: Mapped[str | None] = mapped_column(String(128), nullable=True)
     policy_id: Mapped[int | None] = mapped_column(ForeignKey("policies.id"), nullable=True)
     policy_paused: Mapped[bool] = mapped_column(Boolean, default=False)  # 策略暂停状态
     updated_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

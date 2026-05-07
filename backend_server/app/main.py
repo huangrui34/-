@@ -44,6 +44,11 @@ def migrate_db():
                 conn.execute(text('ALTER TABLE devices ADD COLUMN chip_name VARCHAR(128)'))
                 conn.commit()
             print("[迁移] 已添加 devices.chip_name 列")
+        if 'pending_new_token' not in cols:
+            with engine.connect() as conn:
+                conn.execute(text('ALTER TABLE devices ADD COLUMN pending_new_token VARCHAR(128)'))
+                conn.commit()
+            print("[迁移] 已添加 devices.pending_new_token 列")
 
 migrate_db()
 
@@ -531,6 +536,9 @@ def register_device(payload: DeviceRegister, db: Session = Depends(get_db)):
     return {"token": device.token, "device_id": device.id}
 
 def auth_device(token: str, db: Session) -> Device:
+    # 格式校验：token应为48位hex字符串
+    if not token or len(token) != 48 or not all(c in '0123456789abcdef' for c in token):
+        raise HTTPException(status_code=401, detail="设备令牌无效")
     device = db.query(Device).options(joinedload(Device.policy)).filter(Device.token == token).first()
     if not device:
         raise HTTPException(status_code=401, detail="设备令牌无效")
@@ -574,6 +582,15 @@ def device_heartbeat(
     db.commit()
     db.refresh(device)
     policy = device.policy
+    # 如果有待下发的新token，返回给设备并立即生效
+    new_token = None
+    if device.pending_new_token:
+        new_token = device.pending_new_token
+        device.token = new_token
+        device.pending_new_token = None
+        db.commit()
+        print(f"[Token轮换] 设备 {device.device_name} Token已轮换生效")
+
     return {
         "policy": {
             "mode": policy.mode if policy else None,
@@ -582,7 +599,8 @@ def device_heartbeat(
             "fallback_mode": policy.fallback_mode if policy else None,
             "fallback_value": policy.fallback_value if policy else None,
         },
-        "policy_paused": device.policy_paused
+        "policy_paused": device.policy_paused,
+        "new_token": new_token
     }
 
 def push_policy_update_to_device(device: Device, db: Session, action_type: str = "policy_update", operator: str = "admin"):
@@ -1834,6 +1852,18 @@ def delete_policy(policy_id: int, db: Session = Depends(get_db), user: User = De
     db.commit()
     log_operation(db, "delete_policy", f"删除了策略: {policy_name}", operator=user.username)
     return {"ok": True}
+
+@app.post("/api/v1/devices/{device_id}/rotate-token")
+def rotate_device_token(device_id: int, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_DEVICE_MGMT))):
+    """轮换设备Token：生成新token，旧token在下次心跳时失效"""
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="设备未找到")
+    new_token = secrets.token_hex(24)
+    device.pending_new_token = new_token
+    db.commit()
+    log_operation(db, "rotate_token", f"轮换设备Token: {device.device_name}", device_id, device.device_name, operator=user.username)
+    return {"ok": True, "detail": "新Token已生成，设备下次心跳时自动生效"}
 
 @app.delete("/api/v1/devices/{device_id}")
 def delete_device(device_id: int, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_DEVICE_MGMT))):

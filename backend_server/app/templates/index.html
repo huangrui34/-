@@ -2056,6 +2056,7 @@
                             <button class="btn btn-info btn-sm" onclick="takeScreenshot(${d.id}, '${d.device_name}')" title="需要ADB连接" ${canRemote ? '' : 'disabled'} ${canRemote ? '' : 'style="opacity:0.4;cursor:not-allowed;"'}>远程控制</button>
                             <button class="btn btn-sm" style="background: var(--purple);${canAppMgmt ? '' : 'opacity:0.4;cursor:not-allowed;'}" onclick="manageApps(${d.id}, '${d.device_name}')" title="需要ADB连接" ${canAppMgmt ? '' : 'disabled'}>应用管理</button>
                             <button class="btn btn-danger btn-outline btn-sm" onclick="deleteDevice(${d.id})" ${canDeviceMgmt ? '' : 'disabled'} ${canDeviceMgmt ? '' : 'style="opacity:0.4;cursor:not-allowed;"'}>移除</button>
+                            <button class="btn btn-sm" style="background:var(--teal);${canDeviceMgmt ? '' : 'opacity:0.4;cursor:not-allowed;'}" onclick="rotateToken(${d.id}, '${d.device_name}')" ${canDeviceMgmt ? '' : 'disabled'}>轮换Token</button>
                         </div>
                     </td>
                 </tr>
@@ -2670,6 +2671,17 @@
             if (confirm('确定移除此设备？')) {
                 await authFetch(`/api/v1/devices/${id}`, { method: 'DELETE' });
                 loadData();
+            }
+        }
+
+        async function rotateToken(id, name) {
+            if (!confirm(`确定轮换「${name}」的Token？\n\n轮换后旧Token立即失效，设备下次心跳时自动获取新Token。\n如果设备APP是旧版本（不支持Token轮换），设备将离线，需要重新安装APP。`)) return;
+            try {
+                const resp = await authFetch(`/api/v1/devices/${id}/rotate-token`, { method: 'POST' });
+                const data = await resp.json();
+                alert(data.detail || 'Token轮换成功');
+            } catch(e) {
+                alert('操作失败: ' + (e.detail || '网络错误'));
             }
         }
 
