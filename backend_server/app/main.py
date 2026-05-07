@@ -653,12 +653,26 @@ def device_status(ip: str, db: Session = Depends(get_db), _=Depends(auth_admin(P
     }
 
 @app.get("/api/v1/deploy-tv-stream")
-def remote_deploy_stream(ip: str, server_url: str = None, db: Session = Depends(get_db), user: User = Depends(auth_admin(PERM_DEVICE_MGMT))):
-    """SSE stream version of deploy-tv, pushes real-time progress for each step."""
-    import json as _json
+def remote_deploy_stream(ip: str, server_url: str = None, token: str = "", db: Session = Depends(get_db)):
+    """SSE stream version of deploy-tv, pushes real-time progress for each step.
+    EventSource不支持自定义Header，通过query参数验证JWT。
+    """
+    # 手动验证JWT（EventSource无法设置Authorization header）
+    payload = verify_jwt(token) if token else None
+    if not payload:
+        def err():
+            yield f"data: {json.dumps({'step': 'error', 'detail': '认证失败，请重新登录'}, ensure_ascii=False)}\n\n"
+        return StreamingResponse(err(), media_type="text/event-stream")
+    username = payload.get("username", "unknown")
+    user = db.query(User).filter(User.username == username, User.is_active == True).first()
+    user_perms = json.loads(user.permissions) if user and user.permissions else []
+    if not user or PERM_DEVICE_MGMT not in user_perms:
+        def err():
+            yield f"data: {json.dumps({'step': 'error', 'detail': '权限不足'}, ensure_ascii=False)}\n\n"
+        return StreamingResponse(err(), media_type="text/event-stream")
 
     def sse(data: dict) -> str:
-        return f"data: {_json.dumps(data, ensure_ascii=False)}\n\n"
+        return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
     def generate():
         adb_path = resolve_adb_path()
@@ -784,7 +798,7 @@ def remote_deploy_stream(ip: str, server_url: str = None, db: Session = Depends(
                     device.policy_id = default_policy.id
                     db.commit()
 
-            log_operation(db, "deploy_success", f"已成功向 {ip} 部署 Launcher", device.id, device.device_name, operator=user.username)
+            log_operation(db, "deploy_success", f"已成功向 {ip} 部署 Launcher", device.id, device.device_name, operator=username)
             yield sse({"step": "done", "ok": True, "message": f"部署成功！设备 {device.device_name} 已上线", "device_id": device.id, "device_name": device.device_name})
 
         except Exception as e:

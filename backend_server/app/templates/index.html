@@ -2205,7 +2205,8 @@
             let completedStep = -1;
 
             try {
-                const evtSource = new EventSource(`/api/v1/deploy-tv-stream?ip=${encodeURIComponent(ip)}`);
+                const _token = getAuthToken();
+                const evtSource = new EventSource(`/api/v1/deploy-tv-stream?ip=${encodeURIComponent(ip)}&token=${encodeURIComponent(_token || '')}`);
 
                 evtSource.onmessage = function(event) {
                     const data = JSON.parse(event.data);
