@@ -41,6 +41,10 @@ class MainActivity : AppCompatActivity() {
     private var hdmiPauseTransitionTime = 0L
     private val HDMI_PAUSE_KEY_SUPPRESS_MS = 5000L
 
+    // HDMI断开防抖：延迟执行弹栈，避免多个回调交叉干扰
+    private var hdmiDisconnectRunnable: Runnable? = null
+    private val HDMI_DISCONNECT_DEBOUNCE_MS = 800L
+
     // TvInputManager检测HDMI信号接入（比HDMI_PLUGGED广播更可靠）
     private var tvInputManager: TvInputManager? = null
     private val mainTvInputCallback = object : TvInputManager.TvInputCallback() {
@@ -50,16 +54,22 @@ class MainActivity : AppCompatActivity() {
             if (!isHdmiInput(inputId)) return
             val port = extractHdmiPort(inputId)
             if (state == 0) {
+                // 信号接入：取消任何待执行的断开处理（防止误弹栈）
+                hdmiDisconnectRunnable?.let { mainHandler.removeCallbacks(it) }
+                hdmiDisconnectRunnable = null
                 android.util.Log.d("MainActivity", "HDMI${port}信号接入($inputId)，触发自动切换")
                 mainHandler.post { handleHdmiSignalConnected(port) }
             } else {
-                // 信号丢失：检查当前是否正在显示这个HDMI口
+                // 信号丢失：防抖延迟执行，等系统状态稳定
                 val policyStore = PolicyStore(this@MainActivity)
                 val currentPolicy = policyStore.getPolicy()
                 if (currentPolicy.mode == "hdmi" && currentPolicy.targetHdmiPort == port && policyStore.isHdmiAutoSwitched()) {
-                    // 当前正在显示的HDMI口信号丢失，触发弹栈回退
-                    android.util.Log.d("MainActivity", "HDMI${port}信号丢失（当前显示口），触发弹栈回退")
-                    mainHandler.post { handleHdmiStatusChanged(false) }
+                    android.util.Log.d("MainActivity", "HDMI${port}信号丢失（当前显示口），延迟${HDMI_DISCONNECT_DEBOUNCE_MS}ms后弹栈")
+                    // 取消之前的延迟任务
+                    hdmiDisconnectRunnable?.let { mainHandler.removeCallbacks(it) }
+                    val runnable = Runnable { handleHdmiDisconnectAfterDebounce() }
+                    hdmiDisconnectRunnable = runnable
+                    mainHandler.postDelayed(runnable, HDMI_DISCONNECT_DEBOUNCE_MS)
                 }
             }
         }
@@ -71,10 +81,34 @@ class MainActivity : AppCompatActivity() {
                 val policyStore = PolicyStore(this@MainActivity)
                 val currentPolicy = policyStore.getPolicy()
                 if (currentPolicy.mode == "hdmi" && currentPolicy.targetHdmiPort == port && policyStore.isHdmiAutoSwitched()) {
-                    mainHandler.post { handleHdmiStatusChanged(false) }
+                    hdmiDisconnectRunnable?.let { mainHandler.removeCallbacks(it) }
+                    val runnable = Runnable { handleHdmiDisconnectAfterDebounce() }
+                    hdmiDisconnectRunnable = runnable
+                    mainHandler.postDelayed(runnable, HDMI_DISCONNECT_DEBOUNCE_MS)
                 }
             }
         }
+    }
+
+    /**
+     * HDMI断开防抖后执行：重新验证当前显示口是否真的没信号，再弹栈
+     */
+    private fun handleHdmiDisconnectAfterDebounce() {
+        hdmiDisconnectRunnable = null
+        val policyStore = PolicyStore(this)
+
+        if (!policyStore.isHdmiAutoSwitchEnabled()) return
+        if (!policyStore.isHdmiAutoSwitched()) return
+
+        val currentPolicy = policyStore.getPolicy()
+        // 重新检查：当前显示的HDMI口是否真的没信号了（可能只是短暂闪烁）
+        if (currentPolicy.mode == "hdmi" && isHdmiPortSignalAvailable(currentPolicy.targetHdmiPort)) {
+            android.util.Log.d("MainActivity", "HDMI${currentPolicy.targetHdmiPort}信号恢复，取消弹栈")
+            return
+        }
+
+        // 确认信号确实丢失，执行弹栈
+        handleHdmiStatusChanged(false)
     }
 
     private fun isHdmiInput(inputId: String): Boolean {
@@ -1039,6 +1073,10 @@ class MainActivity : AppCompatActivity() {
         try {
             tvInputManager?.unregisterCallback(mainTvInputCallback)
         } catch (_: Exception) {}
+
+        // 清理HDMI断开防抖
+        hdmiDisconnectRunnable?.let { mainHandler.removeCallbacks(it) }
+        hdmiDisconnectRunnable = null
 
         // 注销广播接收器
         try {
