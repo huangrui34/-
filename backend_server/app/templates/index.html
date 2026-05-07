@@ -979,7 +979,7 @@
                 <button class="btn btn-outline" onclick="showUserManagement()" data-perm="user_mgmt" style="background:var(--purple);color:#fff;">账号管理</button>
                 <!-- 用户菜单 -->
                 <div style="position:relative; display:inline-block;">
-                    <button class="btn btn-outline" onclick="document.getElementById('userDropdown').classList.toggle('show')" style="padding:4px 12px;">
+                    <button class="btn btn-outline" onclick="var dd=document.getElementById('userDropdown');dd.style.display=dd.style.display==='block'?'none':'block'" style="padding:4px 12px;">
                         <span id="userMenuInfo">用户</span> ▾
                     </button>
                     <div id="userDropdown" style="display:none; position:absolute; right:0; top:100%; background:#fff; border:1px solid var(--gray-200); border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.1); min-width:160px; z-index:200;">
@@ -2655,6 +2655,7 @@
         async function bindPolicy(deviceId) {
             const policyId = document.getElementById(`sel-${deviceId}`).value;
             if (!policyId) return alert('请先选择策略');
+            if (!confirm('确定更新此设备的策略？')) return;
             const btn = event.target;
             const oldText = btn.innerText;
             btn.innerText = "下发中...";
@@ -2673,8 +2674,9 @@
         }
 
         async function togglePolicyPause(deviceId, isPaused) {
-            const endpoint = isPaused ? 'resume-policy' : 'pause-policy';
             const action = isPaused ? '继续' : '暂停';
+            if (!confirm(`确定${action}此设备的策略？`)) return;
+            const endpoint = isPaused ? 'resume-policy' : 'pause-policy';
             const btn = document.getElementById(`pause-resume-btn-${deviceId}`);
             btn.innerText = `${action}中...`;
             btn.disabled = true;
@@ -3231,8 +3233,8 @@
         // 点击外部关闭用户下拉菜单
         document.addEventListener('click', function(e) {
             const dd = document.getElementById('userDropdown');
-            if (dd && dd.classList.contains('show') && !e.target.closest('#userDropdown') && !e.target.closest('[onclick*="userDropdown"]')) {
-                dd.classList.remove('show');
+            if (dd && dd.style.display === 'block' && !e.target.closest('#userDropdown') && !e.target.closest('[onclick*="userDropdown"]')) {
+                dd.style.display = 'none';
             }
         });
     </script>
