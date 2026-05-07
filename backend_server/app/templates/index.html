@@ -943,7 +943,7 @@
 </head>
 <body>
     <!-- ========== 登录页 ========== -->
-    <div id="loginPage" style="display:none; min-height:100vh; align-items:center; justify-content:center; background:var(--gray-100);">
+    <div id="loginPage" style="display:flex; min-height:100vh; align-items:center; justify-content:center; background:var(--gray-100);">
         <div style="background:#fff; padding:40px; border-radius:12px; box-shadow:0 2px 12px rgba(0,0,0,0.1); width:380px;">
             <h2 style="text-align:center; margin-bottom:8px; color:var(--gray-900);">TV Launcher 管理后台</h2>
             <p style="text-align:center; margin-bottom:24px; color:var(--gray-500); font-size:13px;">请登录以继续操作</p>
@@ -955,7 +955,7 @@
     </div>
 
     <!-- ========== 主内容 ========== -->
-    <div id="mainContent" class="container">
+    <div id="mainContent" class="container" style="display:none;">
         <div class="header">
             <h1>Meeting TV Launcher</h1>
             <div class="header-actions">
@@ -3223,9 +3223,7 @@
         }
 
         // 修改closeScreenshotModal函数，停止远程连接状态轮询
-        // Init
-        loadData();
-        setInterval(loadData, 5000);
+        // Init - 数据加载由checkAuth成功后触发，这里不直接调用loadData
 
         // 连通性检测（ping + ADB），30秒一次
         let _connCheckRunning = false;
@@ -3258,6 +3256,7 @@
             if (await checkAuth()) {
                 showMainContent();
                 loadData();
+                setInterval(loadData, 5000);
             }
         })();
 
