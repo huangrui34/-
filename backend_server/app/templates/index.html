@@ -1468,22 +1468,6 @@
                     el.style.display = '';
                 }
             });
-            // 无权限的按钮变灰禁用，而非隐藏
-            const readonly = currentUser && currentUser.permissions && currentUser.permissions.length === 1 && currentUser.permissions.includes('device_view');
-            document.querySelectorAll('.action-btn-group .btn').forEach(btn => { btn.disabled = readonly; });
-            document.querySelectorAll('.table-select').forEach(sel => { sel.disabled = readonly; });
-            document.querySelectorAll('.inline-btn').forEach(btn => {
-                btn.disabled = readonly;
-                btn.style.opacity = readonly ? '0.4' : '';
-                btn.style.cursor = readonly ? 'not-allowed' : '';
-            });
-            document.querySelectorAll('.policy-control .btn').forEach(btn => { btn.disabled = readonly; });
-            if (readonly) {
-                document.querySelectorAll('.action-btn-group .btn, .policy-control .btn').forEach(btn => {
-                    btn.style.opacity = '0.4';
-                    btn.style.cursor = 'not-allowed';
-                });
-            }
         }
 
         async function checkAuth() {
@@ -1750,20 +1734,18 @@
             select.value = currentVal;
 
             // Render Policies
+            const canMgmt = hasPerm('policy_mgmt');
             document.getElementById('policyBody').innerHTML = policies.map(p => `
                 <tr>
                     <td><strong>${p.name}</strong></td>
                     <td><span class="app-list-tag">${p.mode.toUpperCase()}</span></td>
                     <td>${p.mode === 'app' ? '<code>' + p.target_app_package + '</code>' : 'HDMI ' + p.target_hdmi_port}</td>
-                    <td><button class="btn btn-danger btn-outline btn-sm" onclick="deletePolicy(${p.id})">删除</button></td>
+                    <td><button class="btn btn-danger btn-outline btn-sm" onclick="deletePolicy(${p.id})" ${canMgmt ? '' : 'disabled style="opacity:0.4;cursor:not-allowed;"'}>删除</button></td>
                 </tr>
             `).join('');
 
             // Render devices with current filter/sort
             renderDevices();
-
-            // 重新应用权限（动态生成的按钮需要再次处理）
-            applyPermissions();
 
             // 同时触发连通性检测（不阻塞渲染）
             checkConnectivity();
@@ -1993,6 +1975,10 @@
             }
 
             const policies = allPolicies;
+            // 无操作权限时按钮直接渲染为禁用状态
+            const canOp = hasPerm('device_op');
+            const dis = canOp ? '' : 'disabled';
+            const disStyle = canOp ? '' : 'style="opacity:0.4;cursor:not-allowed;"';
             document.getElementById('deviceBody').innerHTML = filtered.map(d => {
                 // 如果这个设备的select正在被操作，保留当前select的值（不重建这一行的select）
                 const pendingKey = `sel-${d.id}`;
@@ -2018,7 +2004,7 @@
                             设备名：${d.device_name}
                         </div>
                         <div class="device-sn">SN: ${d.device_sn}</div>
-                        <button class="inline-btn" style="margin-top:4px;" onclick="openRoomEdit(${d.id}, '${d.room_name || ''}')">编辑</button>
+                        <button class="inline-btn" style="margin-top:4px;${canOp ? '' : 'opacity:0.4;cursor:not-allowed;'}" ${dis} onclick="openRoomEdit(${d.id}, '${d.room_name || ''}')">编辑</button>
                     </td>
                     <td style="text-align:center;">
                         ${d.android_version ? '<div style="margin-bottom:2px;"><span class="device-android-ver">Android ' + d.android_version + '</span></div>' : ''}
@@ -2043,11 +2029,11 @@
                     </td>
                     <td>
                         <div style="display: flex; align-items: center; gap: 8px; justify-content: center;">
-                            <select id="sel-${d.id}" class="table-select" onchange="onPolicySelect(${d.id}, this.value)">
+                            <select id="sel-${d.id}" class="table-select" onchange="onPolicySelect(${d.id}, this.value)" ${dis}>
                                 <option value="">未分配策略</option>
                                 ${policies.map(p => `<option value="${p.id}" ${selectedPolicyId == p.id ? 'selected' : ''}>${p.name}</option>`).join('')}
                             </select>
-                            <button class="btn btn-info btn-sm" onclick="bindPolicy(${d.id})">更新</button>
+                            <button class="btn btn-info btn-sm" onclick="bindPolicy(${d.id})" ${dis} ${canOp ? '' : 'style="opacity:0.4;cursor:not-allowed;"'}>更新</button>
                         </div>
                     </td>
                     <td>
@@ -2056,16 +2042,16 @@
                                 ${d.policy_paused ? '已暂停' : '运行中'}
                             </span>
                             <button id="pause-resume-btn-${d.id}" class="btn ${d.policy_paused ? 'btn-success' : 'btn-warning'} btn-sm"
-                                onclick="togglePolicyPause(${d.id}, ${d.policy_paused})">
+                                onclick="togglePolicyPause(${d.id}, ${d.policy_paused})" ${dis} ${canOp ? '' : 'style="opacity:0.4;cursor:not-allowed;"'}>
                                 ${d.policy_paused ? '继续' : '暂停'}
                             </button>
                         </div>
                     </td>
                     <td>
                         <div class="action-btn-group">
-                            <button class="btn btn-info btn-sm" onclick="takeScreenshot(${d.id}, '${d.device_name}')" title="需要ADB连接">远程控制</button>
-                            <button class="btn btn-sm" style="background: var(--purple);" onclick="manageApps(${d.id}, '${d.device_name}')" title="需要ADB连接">应用管理</button>
-                            <button class="btn btn-danger btn-outline btn-sm" onclick="deleteDevice(${d.id})">移除</button>
+                            <button class="btn btn-info btn-sm" onclick="takeScreenshot(${d.id}, '${d.device_name}')" title="需要ADB连接" ${dis} ${canOp ? '' : 'style="opacity:0.4;cursor:not-allowed;"'}>远程控制</button>
+                            <button class="btn btn-sm" style="background: var(--purple);${canOp ? '' : 'opacity:0.4;cursor:not-allowed;'}" onclick="manageApps(${d.id}, '${d.device_name}')" title="需要ADB连接" ${dis}>应用管理</button>
+                            <button class="btn btn-danger btn-outline btn-sm" onclick="deleteDevice(${d.id})" ${dis} ${canOp ? '' : 'style="opacity:0.4;cursor:not-allowed;"'}>移除</button>
                         </div>
                     </td>
                 </tr>
