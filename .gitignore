@@ -161,3 +161,13 @@ secrets.json
 google-services.json
 GoogleService-Info.plist
 firebase-app-id-file.json
+
+# Project backups (use git instead)
+tv-launcher-app_backup_*.tar.gz
+
+# JVM crash logs
+hs_err_pid*.log
+replay_pid*.log
+
+# Root-level database
+tv_launcher.db
