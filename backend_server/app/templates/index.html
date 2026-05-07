@@ -1468,6 +1468,22 @@
                     el.style.display = '';
                 }
             });
+            // 无权限的按钮变灰禁用，而非隐藏
+            const readonly = currentUser && currentUser.permissions && currentUser.permissions.length === 1 && currentUser.permissions.includes('device_view');
+            document.querySelectorAll('.action-btn-group .btn').forEach(btn => { btn.disabled = readonly; });
+            document.querySelectorAll('.table-select').forEach(sel => { sel.disabled = readonly; });
+            document.querySelectorAll('.inline-btn').forEach(btn => {
+                btn.disabled = readonly;
+                btn.style.opacity = readonly ? '0.4' : '';
+                btn.style.cursor = readonly ? 'not-allowed' : '';
+            });
+            document.querySelectorAll('.policy-control .btn').forEach(btn => { btn.disabled = readonly; });
+            if (readonly) {
+                document.querySelectorAll('.action-btn-group .btn, .policy-control .btn').forEach(btn => {
+                    btn.style.opacity = '0.4';
+                    btn.style.cursor = 'not-allowed';
+                });
+            }
         }
 
         async function checkAuth() {
@@ -1745,6 +1761,9 @@
 
             // Render devices with current filter/sort
             renderDevices();
+
+            // 重新应用权限（动态生成的按钮需要再次处理）
+            applyPermissions();
 
             // 同时触发连通性检测（不阻塞渲染）
             checkConnectivity();
