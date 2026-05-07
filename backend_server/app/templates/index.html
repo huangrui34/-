@@ -1690,8 +1690,20 @@
             // 如果用户正在操作策略下拉框，跳过本次刷新
             if (isSelectActive()) return;
 
-            const policies = await (await authFetch('/api/v1/policies')).json();
-            const devices = await (await authFetch('/api/v1/devices')).json();
+            let policies = [];
+            let devices = [];
+            try {
+                const pResp = await authFetch('/api/v1/policies');
+                policies = await pResp.json();
+            } catch(e) {
+                if (e.status !== 403) console.error('加载策略失败:', e);
+            }
+            try {
+                const dResp = await authFetch('/api/v1/devices');
+                devices = await dResp.json();
+            } catch(e) {
+                if (e.status !== 403) console.error('加载设备失败:', e);
+            }
 
             // fetch完成后再次检查（fetch期间用户可能打开了下拉框）
             if (isSelectActive()) return;
