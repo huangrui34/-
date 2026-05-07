@@ -24,6 +24,7 @@
             --purple: #7c3aed;
             --purple-light: #f5f3ff;
             --indigo: #4f46e5;
+            --teal: #0d9488;
             --gray-50: #f9fafb;
             --gray-100: #f3f4f6;
             --gray-200: #e5e7eb;
@@ -238,7 +239,7 @@
 
         th, td {
             padding: 12px 14px;
-            text-align: left;
+            text-align: center;
         }
 
         th {
@@ -253,7 +254,7 @@
 
         td {
             border-bottom: 1px solid var(--gray-100);
-            vertical-align: top;
+            vertical-align: middle;
             font-size: 13px;
         }
 
@@ -365,9 +366,10 @@
         .net-label {
             font-weight: 600;
             color: var(--gray-700);
-            width: 42px;
             display: inline-block;
             font-size: 12px;
+            min-width: 36px;
+            text-align: right;
         }
 
         .net-mac {
@@ -670,6 +672,7 @@
             display: flex;
             flex-wrap: wrap;
             gap: 6px;
+            justify-content: center;
         }
 
         /* ---- Select in table ---- */
@@ -900,6 +903,22 @@
             font-size: 13px;
             font-weight: 500;
             color: var(--gray-700);
+        }
+
+        .device-chip {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--teal);
+            background: rgba(13, 148, 136, 0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: 6px;
+        }
+
+        .device-chip-line {
+            font-size: 11px;
+            color: var(--teal);
+            margin-top: 3px;
         }
 
         .device-android-ver {
@@ -1884,6 +1903,30 @@
             return allText.includes(kw);
         }
 
+        function chipDisplayName(chip) {
+            const map = {
+                'amlogic': '晶晨Amlogic',
+                'm7642': '联发科MT7642',
+                'mtkmt7642': '联发科MT7642',
+                'mt5882': '联发科MT5882',
+                'messenger': '联发科MT5882',
+                'realtek': '瑞昱Realtek',
+                'hisi': '海思HiSilicon',
+                'hi3751': '海思Hi3751',
+                'qcom': '高通Qualcomm',
+                'msm8996': '高通MSM8996',
+                's905': '晶晨S905',
+                's905x': '晶晨S905X',
+                's905d': '晶晨S905D',
+                's905l': '晶晨S905L',
+            };
+            const lower = (chip || '').toLowerCase();
+            for (const [key, name] of Object.entries(map)) {
+                if (lower.includes(key)) return name;
+            }
+            return chip;
+        }
+
         function renderDevices() {
             const searchKw = document.getElementById('deviceSearch').value.trim();
             let filtered = [...allDevices];
@@ -1938,16 +1981,18 @@
 
                 return `
                 <tr>
-                    <td>
+                    <td style="text-align:center;">
                         <div class="room-tag">${d.room_name || '未分配会议室'}</div>
-                        <div class="device-name">
+                        <div class="device-name" style="justify-content:center;">
                             ${d.device_name}
-                            <button class="inline-btn" onclick="openRoomEdit(${d.id}, '${d.room_name || ''}')">编辑</button>
                         </div>
                         <div class="device-sn">SN: ${d.device_sn}</div>
+                        <button class="inline-btn" style="margin-top:4px;" onclick="openRoomEdit(${d.id}, '${d.room_name || ''}')">编辑</button>
                     </td>
-                    <td>
-                        <div class="device-model">${d.model_name || '-'}${d.android_version ? ' <span class="device-android-ver">Android ' + d.android_version + '</span>' : ''}</div>
+                    <td style="text-align:center;">
+                        <div class="device-model">${d.model_name || '-'}</div>
+                        ${d.chip_name ? '<div class="device-chip-line">芯片名称：' + d.chip_name + ' (' + chipDisplayName(d.chip_name) + ')</div>' : ''}
+                        ${d.android_version ? '<div style="margin-top:2px;"><span class="device-android-ver">Android ' + d.android_version + '</span></div>' : ''}
                         <div style="margin-top: 10px;">
                             <div class="usage-text">RAM: ${d.ram_usage || 'N/A'}</div>
                             <div class="progress-container"><div class="progress-bar" style="width: ${ramData.percent}%; background: ${ramData.color}"></div></div>
@@ -1955,7 +2000,7 @@
                             <div class="progress-container"><div class="progress-bar" style="width: ${storageData.percent}%; background: ${storageData.color}"></div></div>
                         </div>
                     </td>
-                    <td class="net-info">
+                    <td class="net-info" style="text-align:center;">
                         <div><span class="net-label">有线:</span> ${d.eth_ip && d.eth_ip !== '0.0.0.0' ? d.eth_ip : '—'}</div>
                         <div class="net-mac">${d.eth_mac ? 'MAC: ' + d.eth_mac : ''}</div>
                         <div style="margin-top:4px;"><span class="net-label">WiFi:</span> ${d.wifi_ip && d.wifi_ip !== '0.0.0.0' ? d.wifi_ip : '—'}</div>
@@ -1966,7 +2011,7 @@
                         ${renderOnlineStatus(d)}
                     </td>
                     <td>
-                        <div style="display: flex; align-items: center; gap: 8px;">
+                        <div style="display: flex; align-items: center; gap: 8px; justify-content: center;">
                             <select id="sel-${d.id}" class="table-select" onchange="onPolicySelect(${d.id}, this.value)">
                                 <option value="">未分配策略</option>
                                 ${policies.map(p => `<option value="${p.id}" ${selectedPolicyId == p.id ? 'selected' : ''}>${p.name}</option>`).join('')}

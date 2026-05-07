@@ -32,6 +32,21 @@ from .schemas import (
 
 Base.metadata.create_all(bind=engine)
 
+# 数据库迁移：为现有表添加新列
+def migrate_db():
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    # devices表添加chip_name列
+    if 'devices' in insp.get_table_names():
+        cols = [c['name'] for c in insp.get_columns('devices')]
+        if 'chip_name' not in cols:
+            with engine.connect() as conn:
+                conn.execute(text('ALTER TABLE devices ADD COLUMN chip_name VARCHAR(128)'))
+                conn.commit()
+            print("[迁移] 已添加 devices.chip_name 列")
+
+migrate_db()
+
 # ========== 认证核心 ==========
 
 JWT_SECRET = os.getenv("JWT_SECRET", "tv-launcher-secret-change-in-production")

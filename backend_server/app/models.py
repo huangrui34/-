@@ -50,6 +50,7 @@ class Device(Base):
     device_name: Mapped[str] = mapped_column(String(128), nullable=False)
     room_name: Mapped[str | None] = mapped_column(String(128), nullable=True) # New field
     model_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    chip_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     android_version: Mapped[str | None] = mapped_column(String(16), nullable=True)
     ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True) # Legacy field
     wifi_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)

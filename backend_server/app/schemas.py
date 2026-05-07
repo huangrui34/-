@@ -25,6 +25,7 @@ class DeviceRegister(BaseModel):
     device_name: str
     room_name: Optional[str] = None
     model_name: Optional[str] = None
+    chip_name: Optional[str] = None
     wifi_mac: Optional[str] = None
     eth_mac: Optional[str] = None
 
@@ -43,6 +44,8 @@ class DeviceHeartbeatIn(BaseModel):
     installed_apps: Optional[str] = None
     ram_usage: Optional[str] = None
     storage_usage: Optional[str] = None
+    android_version: Optional[str] = None
+    chip_name: Optional[str] = None
     status: str = "ok"
     message: Optional[str] = None
 
@@ -52,6 +55,7 @@ class DeviceOut(BaseModel):
     device_name: str
     room_name: Optional[str]
     model_name: Optional[str]
+    chip_name: Optional[str] = None
     android_version: Optional[str] = None
     wifi_ip: Optional[str]
     eth_ip: Optional[str]
