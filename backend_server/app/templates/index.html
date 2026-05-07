@@ -1990,9 +1990,9 @@
                         <button class="inline-btn" style="margin-top:4px;" onclick="openRoomEdit(${d.id}, '${d.room_name || ''}')">编辑</button>
                     </td>
                     <td style="text-align:center;">
+                        ${d.android_version ? '<div style="margin-bottom:2px;"><span class="device-android-ver">Android ' + d.android_version + '</span></div>' : ''}
                         <div class="device-model">型号名：${d.model_name || '-'}</div>
                         ${d.chip_name ? '<div class="device-chip-line">芯片名称：' + d.chip_name + ' (' + chipDisplayName(d.chip_name) + ')</div>' : ''}
-                        ${d.android_version ? '<div style="margin-top:2px;"><span class="device-android-ver">Android ' + d.android_version + '</span></div>' : ''}
                         <div style="margin-top: 10px;">
                             <div class="usage-text">RAM: ${d.ram_usage || 'N/A'}</div>
                             <div class="progress-container"><div class="progress-bar" style="width: ${ramData.percent}%; background: ${ramData.color}"></div></div>
