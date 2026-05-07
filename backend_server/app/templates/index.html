@@ -1984,13 +1984,13 @@
                     <td style="text-align:center;">
                         <div class="room-tag">${d.room_name || '未分配会议室'}</div>
                         <div class="device-name" style="justify-content:center;">
-                            ${d.device_name}
+                            设备名：${d.device_name}
                         </div>
                         <div class="device-sn">SN: ${d.device_sn}</div>
                         <button class="inline-btn" style="margin-top:4px;" onclick="openRoomEdit(${d.id}, '${d.room_name || ''}')">编辑</button>
                     </td>
                     <td style="text-align:center;">
-                        <div class="device-model">${d.model_name || '-'}</div>
+                        <div class="device-model">型号名：${d.model_name || '-'}</div>
                         ${d.chip_name ? '<div class="device-chip-line">芯片名称：' + d.chip_name + ' (' + chipDisplayName(d.chip_name) + ')</div>' : ''}
                         ${d.android_version ? '<div style="margin-top:2px;"><span class="device-android-ver">Android ' + d.android_version + '</span></div>' : ''}
                         <div style="margin-top: 10px;">
