@@ -1977,6 +1977,10 @@
             const policies = allPolicies;
             // 无操作权限时按钮直接渲染为禁用状态
             const canOp = hasPerm('device_op');
+            const canRemote = hasPerm('remote_ctrl');
+            const canAppMgmt = hasPerm('app_mgmt');
+            const canPolicyMgmt = hasPerm('policy_mgmt');
+            const canDeviceMgmt = hasPerm('device_mgmt');
             const dis = canOp ? '' : 'disabled';
             const disStyle = canOp ? '' : 'style="opacity:0.4;cursor:not-allowed;"';
             document.getElementById('deviceBody').innerHTML = filtered.map(d => {
@@ -2004,7 +2008,7 @@
                             设备名：${d.device_name}
                         </div>
                         <div class="device-sn">SN: ${d.device_sn}</div>
-                        <button class="inline-btn" style="margin-top:4px;${canOp ? '' : 'opacity:0.4;cursor:not-allowed;'}" ${dis} onclick="openRoomEdit(${d.id}, '${d.room_name || ''}')">编辑</button>
+                        <button class="inline-btn" style="margin-top:4px;${canOp ? '' : 'opacity:0.4;cursor:not-allowed;'}" ${canOp ? '' : 'disabled'} onclick="openRoomEdit(${d.id}, '${d.room_name || ''}')">编辑</button>
                     </td>
                     <td style="text-align:center;">
                         ${d.android_version ? '<div style="margin-bottom:2px;"><span class="device-android-ver">Android ' + d.android_version + '</span></div>' : ''}
@@ -2029,11 +2033,11 @@
                     </td>
                     <td>
                         <div style="display: flex; align-items: center; gap: 8px; justify-content: center;">
-                            <select id="sel-${d.id}" class="table-select" onchange="onPolicySelect(${d.id}, this.value)" ${dis}>
+                            <select id="sel-${d.id}" class="table-select" onchange="onPolicySelect(${d.id}, this.value)" ${canPolicyMgmt ? '' : 'disabled'}>
                                 <option value="">未分配策略</option>
                                 ${policies.map(p => `<option value="${p.id}" ${selectedPolicyId == p.id ? 'selected' : ''}>${p.name}</option>`).join('')}
                             </select>
-                            <button class="btn btn-info btn-sm" onclick="bindPolicy(${d.id})" ${dis} ${canOp ? '' : 'style="opacity:0.4;cursor:not-allowed;"'}>更新</button>
+                            <button class="btn btn-info btn-sm" onclick="bindPolicy(${d.id})" ${canPolicyMgmt ? '' : 'disabled'} ${canPolicyMgmt ? '' : 'style="opacity:0.4;cursor:not-allowed;"'}>更新</button>
                         </div>
                     </td>
                     <td>
@@ -2042,16 +2046,16 @@
                                 ${d.policy_paused ? '已暂停' : '运行中'}
                             </span>
                             <button id="pause-resume-btn-${d.id}" class="btn ${d.policy_paused ? 'btn-success' : 'btn-warning'} btn-sm"
-                                onclick="togglePolicyPause(${d.id}, ${d.policy_paused})" ${dis} ${canOp ? '' : 'style="opacity:0.4;cursor:not-allowed;"'}>
+                                onclick="togglePolicyPause(${d.id}, ${d.policy_paused})" ${canOp ? '' : 'disabled'} ${canOp ? '' : 'style="opacity:0.4;cursor:not-allowed;"'}>
                                 ${d.policy_paused ? '继续' : '暂停'}
                             </button>
                         </div>
                     </td>
                     <td>
                         <div class="action-btn-group">
-                            <button class="btn btn-info btn-sm" onclick="takeScreenshot(${d.id}, '${d.device_name}')" title="需要ADB连接" ${dis} ${canOp ? '' : 'style="opacity:0.4;cursor:not-allowed;"'}>远程控制</button>
-                            <button class="btn btn-sm" style="background: var(--purple);${canOp ? '' : 'opacity:0.4;cursor:not-allowed;'}" onclick="manageApps(${d.id}, '${d.device_name}')" title="需要ADB连接" ${dis}>应用管理</button>
-                            <button class="btn btn-danger btn-outline btn-sm" onclick="deleteDevice(${d.id})" ${dis} ${canOp ? '' : 'style="opacity:0.4;cursor:not-allowed;"'}>移除</button>
+                            <button class="btn btn-info btn-sm" onclick="takeScreenshot(${d.id}, '${d.device_name}')" title="需要ADB连接" ${canRemote ? '' : 'disabled'} ${canRemote ? '' : 'style="opacity:0.4;cursor:not-allowed;"'}>远程控制</button>
+                            <button class="btn btn-sm" style="background: var(--purple);${canAppMgmt ? '' : 'opacity:0.4;cursor:not-allowed;'}" onclick="manageApps(${d.id}, '${d.device_name}')" title="需要ADB连接" ${canAppMgmt ? '' : 'disabled'}>应用管理</button>
+                            <button class="btn btn-danger btn-outline btn-sm" onclick="deleteDevice(${d.id})" ${canDeviceMgmt ? '' : 'disabled'} ${canDeviceMgmt ? '' : 'style="opacity:0.4;cursor:not-allowed;"'}>移除</button>
                         </div>
                     </td>
                 </tr>
