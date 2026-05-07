@@ -130,6 +130,47 @@ class PolicyStore(private val context: Context) {
             .apply()
     }
 
+    // HDMI信号栈（LIFO）：记录HDMI信号接入顺序，断开时弹栈回到上一个
+    fun pushHdmiPort(port: Int) {
+        val stack = getHdmiStack().toMutableList()
+        // 避免重复
+        if (stack.lastOrNull() != port) {
+            stack.add(port)
+            prefs.edit().putString("hdmi_signal_stack", org.json.JSONArray(stack).toString()).apply()
+        }
+    }
+
+    fun popHdmiPort(): Int? {
+        val stack = getHdmiStack().toMutableList()
+        if (stack.isEmpty()) return null
+        val port = stack.removeLast()
+        prefs.edit().putString("hdmi_signal_stack", org.json.JSONArray(stack).toString()).apply()
+        return port
+    }
+
+    fun peekHdmiPort(): Int? {
+        val stack = getHdmiStack()
+        return stack.lastOrNull()
+    }
+
+    fun getHdmiStack(): List<Int> {
+        val json = prefs.getString("hdmi_signal_stack", null) ?: return emptyList()
+        return try {
+            val arr = org.json.JSONArray(json)
+            (0 until arr.length()).map { arr.getInt(it) }
+        } catch (_: Exception) { emptyList() }
+    }
+
+    fun clearHdmiStack() {
+        prefs.edit().remove("hdmi_signal_stack").apply()
+    }
+
+    fun removeFromHdmiStack(port: Int) {
+        val stack = getHdmiStack().toMutableList()
+        stack.remove(port)
+        prefs.edit().putString("hdmi_signal_stack", org.json.JSONArray(stack).toString()).apply()
+    }
+
     // HDMI自动切换标记：当前是否因HDMI接入而自动切换了策略
     fun isHdmiAutoSwitched(): Boolean = prefs.getBoolean("hdmi_auto_switched", false)
 
